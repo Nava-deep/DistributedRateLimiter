@@ -1,0 +1,38 @@
+name: Feature request
+description: Propose a backend, infra, or observability improvement.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem are we solving?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the desired behavior, API, or system change.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Mention simpler options or tradeoffs if relevant.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Rate limiting algorithm
+        - Policy management
+        - Reliability or fallback
+        - Observability
+        - Performance or scaling
+        - Developer experience
+    validations:
+      required: true
+

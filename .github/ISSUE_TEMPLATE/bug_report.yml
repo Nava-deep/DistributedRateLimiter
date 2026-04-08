@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a correctness, reliability, or operational issue.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Include requests, policies, environment details, and expected vs actual behavior.
+      placeholder: |
+        1. Create policy...
+        2. Send concurrent requests...
+        3. Observe...
+    validations:
+      required: true
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact area
+      options:
+        - Rate limiting correctness
+        - Redis behavior
+        - PostgreSQL or migrations
+        - Metrics or logging
+        - Docker or deployment
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or metrics
+      description: Paste relevant logs, headers, or Prometheus observations.
+
