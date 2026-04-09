@@ -264,7 +264,7 @@ These metrics make it possible to answer useful engineering questions:
 
 ## Validation And Benchmarking
 
-This repository includes automated proof for both correctness and performance-related claims.
+This repository includes automated validation for both correctness and synthetic performance testing.
 
 ### Correctness Coverage
 
@@ -302,7 +302,7 @@ The Locust-based benchmark workflow measures:
 - number of concurrent virtual users
 - benchmark notes and environment context
 
-All benchmark runs are synthetic. They are useful for honest resume claims, but they should be described as synthetic benchmark results rather than production traffic.
+All benchmark runs are synthetic and should be interpreted as controlled benchmark measurements rather than production traffic.
 
 Results are written to timestamped folders under [`benchmark_results`](/Users/navadeepboyana/Documents/DistributedRateLimiter/benchmark_results).
 
@@ -413,31 +413,3 @@ curl -X POST http://localhost:8000/admin/policies \
     "failure_mode": "fail_closed"
   }'
 ```
-
-## What This Project Demonstrates
-
-This project is meant to show the following engineering capabilities clearly:
-
-- backend API design
-- distributed shared-state coordination
-- concurrency-safe control logic
-- policy-driven system behavior
-- observability and failure handling
-- correctness-focused automated testing
-- reproducible synthetic performance validation
-
-## Interview Talking Points
-
-- Why local in-memory rate limiting breaks in horizontally scaled systems
-- Why Redis Lua scripts are safer than naive application-side increments
-- When token bucket is better than fixed window
-- Why policy versioning matters for distributed counters
-- How fail-open and fail-closed modes affect availability vs protection
-- How cache invalidation is handled across instances
-- How to talk honestly about synthetic benchmark results
-
-## Resume-Safe Bullet Templates
-
-- Built a distributed rate limiter that enforced shared quotas across `<instance_count>` FastAPI instances using Redis atomic coordination.
-- Implemented token bucket, fixed window, and sliding window algorithms with concurrency-safe Redis state transitions and policy-driven enforcement.
-- Validated distributed correctness with `<test_count>` automated tests covering concurrency, dependency failure, multi-instance coordination, and policy matching.
