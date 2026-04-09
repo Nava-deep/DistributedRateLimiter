@@ -37,6 +37,8 @@ asyncio_mode = "auto"
 markers = [
   "unit: fast pure-python unit tests",
   "integration: tests that exercise Redis/PostgreSQL-backed flows",
+  "concurrency: tests focused on atomic distributed correctness under parallel traffic",
+  "failure: tests focused on degraded behavior and dependency failures",
 ]
 testpaths = ["tests"]
 
@@ -46,4 +48,3 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "N", "ASYNC"]
-

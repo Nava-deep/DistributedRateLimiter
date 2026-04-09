@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
 
-.PHONY: install run lint test test-unit test-integration migrate seed-demo compose-up compose-down benchmark
+.PHONY: install run lint test test-unit test-integration test-concurrency test-failure migrate seed-demo compose-up compose-down benchmark benchmark-report
 
 install:
 	$(PIP) install -e ".[dev]"
@@ -21,6 +21,12 @@ test-unit:
 test-integration:
 	pytest -q -m integration
 
+test-concurrency:
+	pytest -q -m concurrency
+
+test-failure:
+	pytest -q -m failure
+
 migrate:
 	alembic upgrade head
 
@@ -35,3 +41,6 @@ compose-down:
 
 benchmark:
 	$(PYTHON) scripts/run_benchmark.py
+
+benchmark-report:
+	$(PYTHON) scripts/run_benchmark.py --notes "Synthetic benchmark run"

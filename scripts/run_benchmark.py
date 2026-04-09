@@ -21,6 +21,7 @@ DEFAULT_RESULTS_DIR = ROOT / "benchmark_results"
 @dataclass(slots=True)
 class BenchmarkSummary:
     scenario: str
+    correctness_test_count: int
     target_hosts: list[str]
     api_instances: int
     concurrent_users: int
@@ -181,6 +182,28 @@ def create_results_dir(root: Path, scenario: str) -> Path:
     return result_dir
 
 
+def collect_test_count() -> int:
+    command = [sys.executable, "-m", "pytest", "--collect-only", "-q", "tests"]
+    completed = subprocess.run(
+        command,
+        cwd=ROOT,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    output = "\n".join([completed.stdout, completed.stderr])
+    match = re.search(r"(\d+)\s+tests?\s+collected", output)
+    if match is not None:
+        return int(match.group(1))
+
+    pattern = re.compile(r"^\s*(?:async\s+def|def)\s+(test_[a-zA-Z0-9_]+)\s*\(")
+    count = 0
+    for path in (ROOT / "tests").rglob("test_*.py"):
+        source = path.read_text(encoding="utf-8")
+        count += len(pattern.findall(source))
+    return count
+
+
 def run_locust(
     *,
     result_dir: Path,
@@ -294,6 +317,7 @@ def parse_locust_console_summary(
 def summarize_result(
     *,
     scenario: str,
+    correctness_test_count: int,
     target_hosts: list[str],
     api_instances: int,
     users: int,
@@ -319,6 +343,7 @@ def summarize_result(
 
     summary = BenchmarkSummary(
         scenario=scenario,
+        correctness_test_count=correctness_test_count,
         target_hosts=target_hosts,
         api_instances=api_instances,
         concurrent_users=users,
@@ -349,6 +374,7 @@ def write_summary(result_dir: Path, summary: BenchmarkSummary) -> None:
                 "# Benchmark Summary",
                 "",
                 f"- Scenario: `{summary.scenario}`",
+                f"- Correctness tests available: `{summary.correctness_test_count}`",
                 f"- Target hosts: `{', '.join(summary.target_hosts)}`",
                 f"- API instances: `{summary.api_instances}`",
                 f"- Concurrent users: `{summary.concurrent_users}`",
@@ -376,12 +402,14 @@ def write_summary(result_dir: Path, summary: BenchmarkSummary) -> None:
 def main() -> int:
     args = parse_args()
     target_hosts = parse_target_hosts(args.target_hosts)
+    correctness_test_count = collect_test_count()
     result_dir = create_results_dir(Path(args.output_dir), args.scenario)
 
     (result_dir / "metadata.json").write_text(
         json.dumps(
             {
                 "scenario": args.scenario,
+                "correctness_test_count": correctness_test_count,
                 "target_hosts": target_hosts,
                 "api_instances": args.api_instances,
                 "concurrent_users": args.users,
@@ -409,6 +437,7 @@ def main() -> int:
     )
     summary = summarize_result(
         scenario=args.scenario,
+        correctness_test_count=correctness_test_count,
         target_hosts=target_hosts,
         api_instances=args.api_instances,
         users=args.users,

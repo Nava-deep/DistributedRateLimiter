@@ -28,6 +28,7 @@ def protected_policy(
 
 
 @pytest.mark.integration
+@pytest.mark.concurrency
 @pytest.mark.asyncio
 async def test_shared_redis_state_is_enforced_across_two_app_instances(
     app_factory,
@@ -70,6 +71,7 @@ async def test_shared_redis_state_is_enforced_across_two_app_instances(
 
 
 @pytest.mark.integration
+@pytest.mark.concurrency
 @pytest.mark.asyncio
 async def test_concurrent_burst_traffic_across_instances_matches_expected_counts(
     app_factory,

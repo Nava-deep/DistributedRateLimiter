@@ -19,6 +19,7 @@ def route_policy(*, name: str, route: str, failure_mode: str):
 
 
 @pytest.mark.integration
+@pytest.mark.failure
 @pytest.mark.asyncio
 async def test_fail_open_when_redis_is_unavailable(client, app, admin_headers, monkeypatch) -> None:
     await client.post(
@@ -39,6 +40,7 @@ async def test_fail_open_when_redis_is_unavailable(client, app, admin_headers, m
 
 
 @pytest.mark.integration
+@pytest.mark.failure
 @pytest.mark.asyncio
 async def test_fail_closed_when_redis_is_unavailable(
     client,
@@ -68,6 +70,7 @@ async def test_fail_closed_when_redis_is_unavailable(
 
 
 @pytest.mark.integration
+@pytest.mark.concurrency
 @pytest.mark.asyncio
 async def test_concurrent_requests_do_not_bypass_limit(client, admin_headers) -> None:
     await client.post(
