@@ -304,7 +304,7 @@ The Locust-based benchmark workflow measures:
 
 All benchmark runs are synthetic and should be interpreted as controlled benchmark measurements rather than production traffic.
 
-Results are written to timestamped folders under [`benchmark_results`](/Users/navadeepboyana/Documents/DistributedRateLimiter/benchmark_results).
+Results are written to timestamped folders under [`benchmark_results`](/Users/navadeepboyana/Documents/DistributedRateLimiter/benchmark_results). The repository keeps this directory as an empty tracked placeholder, and generated benchmark run folders are created locally at runtime and remain gitignored.
 
 ## Tech Stack
 
