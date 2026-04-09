@@ -304,7 +304,7 @@ The Locust-based benchmark workflow measures:
 
 All benchmark runs are synthetic and should be interpreted as controlled benchmark measurements rather than production traffic.
 
-Results are written to timestamped folders under [`benchmark_results`](/Users/navadeepboyana/Documents/DistributedRateLimiter/benchmark_results). The repository includes a committed sample benchmark run so the output format is visible on GitHub, and additional local runs create new timestamped folders in the same directory.
+Results are written to timestamped folders under [`benchmark_results`](benchmark_results/). The repository includes a committed sample benchmark run in [`benchmark_results/20260409T100908Z_shared-protected`](benchmark_results/20260409T100908Z_shared-protected/) so the output format is visible on GitHub, and additional local runs create new timestamped folders in the same directory.
 
 ## Tech Stack
 
