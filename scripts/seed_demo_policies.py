@@ -60,7 +60,10 @@ async def main() -> None:
                 snapshot_store=PolicySnapshotStore(),
                 logger=logger,
             )
-            existing = {policy.name for policy in await policy_service.list_policies(active_only=False)}
+            existing = {
+                policy.name
+                for policy in await policy_service.list_policies(active_only=False)
+            }
             for payload in seed_policies:
                 if payload.name not in existing:
                     await policy_service.create_policy(payload)
@@ -71,4 +74,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-

@@ -7,9 +7,10 @@ Create Date: 2026-04-09 00:00:00
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision: str = "20260409_000001"
 down_revision: str | None = None
@@ -45,8 +46,18 @@ def upgrade() -> None:
         sa.Column("tenant_id", sa.String(length=128), nullable=True),
         sa.Column("api_key", sa.String(length=128), nullable=True),
         sa.Column("failure_mode", failure_mode, nullable=False, server_default="fail_closed"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.UniqueConstraint("name", name="uq_rate_limit_policies_name"),
     )
     op.create_index("ix_rate_limit_policies_name", "rate_limit_policies", ["name"])

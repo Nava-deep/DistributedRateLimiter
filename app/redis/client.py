@@ -16,6 +16,17 @@ def create_redis_client(settings: Settings) -> Redis:
     )
 
 
+def create_pubsub_redis_client(settings: Settings) -> Redis:
+    return Redis.from_url(
+        settings.redis_url,
+        encoding="utf-8",
+        decode_responses=True,
+        socket_timeout=None,
+        socket_connect_timeout=settings.redis_socket_timeout_seconds,
+        health_check_interval=30,
+    )
+
+
 async def ping_redis(redis_client: Redis) -> bool:
     await redis_client.ping()
     return True

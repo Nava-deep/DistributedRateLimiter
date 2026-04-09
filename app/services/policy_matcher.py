@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from app.services.key_builder import RequestIdentity
 
@@ -45,4 +46,3 @@ def select_best_policy(policies: Iterable[Any], identity: RequestIdentity) -> An
     if not matching:
         return None
     return max(matching, key=policy_score)
-

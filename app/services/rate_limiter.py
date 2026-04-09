@@ -50,7 +50,10 @@ class RateLimiterService:
         self.redis_client = redis_client
         self.logger = logger
 
-    async def evaluate(self, identity: RequestIdentity) -> tuple[RateLimitDecision | None, PolicyRead | None]:
+    async def evaluate(
+        self,
+        identity: RequestIdentity,
+    ) -> tuple[RateLimitDecision | None, PolicyRead | None]:
         policy = await self.policy_service.resolve_policy(identity)
         if policy is None:
             return None, None

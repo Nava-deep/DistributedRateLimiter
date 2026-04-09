@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,7 @@ async def get_db_session(request: Request) -> AsyncIterator[AsyncSession]:
 
 async def get_policy_service(
     request: Request,
-    session: AsyncSession = Depends(get_db_session),
+    session: DatabaseSessionDependency,
 ) -> PolicyService:
     return PolicyService(
         session=session,
@@ -31,7 +32,7 @@ async def get_policy_service(
 
 async def get_rate_limiter(
     request: Request,
-    policy_service: PolicyService = Depends(get_policy_service),
+    policy_service: PolicyServiceDependency,
 ) -> RateLimiterService:
     return RateLimiterService(
         policy_service=policy_service,
@@ -48,10 +49,15 @@ async def get_health_service(request: Request) -> HealthService:
     )
 
 
+DatabaseSessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
+PolicyServiceDependency = Annotated[PolicyService, Depends(get_policy_service)]
+RateLimiterDependency = Annotated[RateLimiterService, Depends(get_rate_limiter)]
+
+
 async def enforce_rate_limit(
     request: Request,
     response: Response,
-    rate_limiter: RateLimiterService = Depends(get_rate_limiter),
+    rate_limiter: RateLimiterDependency,
 ) -> None:
     identity = build_request_identity(request)
     decision, policy = await rate_limiter.evaluate(identity)
@@ -74,4 +80,3 @@ async def enforce_rate_limit(
             detail=detail,
             headers=decision.headers,
         )
-

@@ -40,10 +40,19 @@ async def test_fail_open_when_redis_is_unavailable(client, app, admin_headers, m
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_fail_closed_when_redis_is_unavailable(client, app, admin_headers, monkeypatch) -> None:
+async def test_fail_closed_when_redis_is_unavailable(
+    client,
+    app,
+    admin_headers,
+    monkeypatch,
+) -> None:
     await client.post(
         "/admin/policies",
-        json=route_policy(name="protected-fail-closed", route="/demo/protected", failure_mode="fail_closed"),
+        json=route_policy(
+            name="protected-fail-closed",
+            route="/demo/protected",
+            failure_mode="fail_closed",
+        ),
         headers=admin_headers,
     )
 

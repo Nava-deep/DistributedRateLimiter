@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from prometheus_client import Counter, Histogram, REGISTRY, generate_latest
+from prometheus_client import REGISTRY, Counter, Histogram, generate_latest
 from prometheus_client.exposition import CONTENT_TYPE_LATEST
 from starlette.responses import Response
-
 
 HTTP_REQUESTS_TOTAL = Counter(
     "distributed_rate_limiter_http_requests_total",
@@ -75,4 +74,3 @@ def mark_redis_error(operation: str) -> None:
 
 def render_metrics() -> Response:
     return Response(generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
-

@@ -3,7 +3,15 @@ from __future__ import annotations
 import pytest
 
 
-def policy_payload(*, name: str, algorithm: str, route: str, rate: int, window_seconds: int = 60, **extra):
+def policy_payload(
+    *,
+    name: str,
+    algorithm: str,
+    route: str,
+    rate: int,
+    window_seconds: int = 60,
+    **extra,
+):
     payload = {
         "name": name,
         "algorithm": algorithm,
@@ -83,7 +91,10 @@ async def test_sliding_window_blocks_after_limit(client, admin_headers) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_route_fallback_applies_when_user_specific_policy_is_absent(client, admin_headers) -> None:
+async def test_route_fallback_applies_when_user_specific_policy_is_absent(
+    client,
+    admin_headers,
+) -> None:
     await client.post(
         "/admin/policies",
         json=policy_payload(
@@ -132,4 +143,3 @@ async def test_user_specific_policy_overrides_route_default(client, admin_header
 
     assert [response.status_code for response in alice_responses] == [200, 200, 429]
     assert [response.status_code for response in bob_responses] == [200, 429]
-

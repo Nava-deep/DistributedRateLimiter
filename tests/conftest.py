@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from alembic import command
 from alembic.config import Config
 from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
@@ -15,6 +14,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from testcontainers.core.container import DockerContainer
 from testcontainers.postgres import PostgresContainer
 
+from alembic import command
 from app.core.config import Settings, clear_settings_cache
 from app.main import create_app
 
@@ -47,7 +47,10 @@ def redis_container() -> DockerContainer:
 
 
 @pytest.fixture(scope="session")
-def integration_urls(postgres_container: PostgresContainer, redis_container: DockerContainer) -> dict[str, str]:
+def integration_urls(
+    postgres_container: PostgresContainer,
+    redis_container: DockerContainer,
+) -> dict[str, str]:
     postgres_url = to_async_postgres_url(postgres_container.get_connection_url())
     redis_host = redis_container.get_container_host_ip()
     redis_port = redis_container.get_exposed_port(6379)

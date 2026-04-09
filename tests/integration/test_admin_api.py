@@ -21,7 +21,11 @@ def sample_policy_payload(**overrides):
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_create_policy(client, admin_headers) -> None:
-    response = await client.post("/admin/policies", json=sample_policy_payload(), headers=admin_headers)
+    response = await client.post(
+        "/admin/policies",
+        json=sample_policy_payload(),
+        headers=admin_headers,
+    )
 
     assert response.status_code == 201
     body = response.json()
@@ -32,7 +36,11 @@ async def test_create_policy(client, admin_headers) -> None:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_list_policies_filters_inactive_records(client, admin_headers) -> None:
-    await client.post("/admin/policies", json=sample_policy_payload(name="active-one"), headers=admin_headers)
+    await client.post(
+        "/admin/policies",
+        json=sample_policy_payload(name="active-one"),
+        headers=admin_headers,
+    )
     await client.post(
         "/admin/policies",
         json=sample_policy_payload(name="inactive-one", active=False),
@@ -100,4 +108,3 @@ async def test_delete_policy_removes_it(client, admin_headers) -> None:
 
     assert delete_response.status_code == 204
     assert get_response.status_code == 404
-

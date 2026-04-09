@@ -24,7 +24,10 @@ def build_demo_payload(request: Request, message: str) -> dict[str, object]:
 async def demo_public(request: Request) -> dict[str, object]:
     return build_demo_payload(
         request,
-        "Public endpoint reached. If Redis is unavailable and the policy is fail-open, requests continue.",
+        (
+            "Public endpoint reached. "
+            "If Redis is unavailable and the policy is fail-open, requests continue."
+        ),
     )
 
 
@@ -32,7 +35,10 @@ async def demo_public(request: Request) -> dict[str, object]:
 async def demo_protected(request: Request) -> dict[str, object]:
     return build_demo_payload(
         request,
-        "Protected endpoint reached. In fail-closed mode the limiter blocks when Redis is unavailable.",
+        (
+            "Protected endpoint reached. "
+            "In fail-closed mode the limiter blocks when Redis is unavailable."
+        ),
     )
 
 
@@ -40,6 +46,8 @@ async def demo_protected(request: Request) -> dict[str, object]:
 async def demo_user(user_id: str, request: Request) -> dict[str, object]:
     return build_demo_payload(
         request,
-        f"User-scoped endpoint reached for {user_id}. User-specific or composite policies take priority.",
+        (
+            f"User-scoped endpoint reached for {user_id}. "
+            "User-specific or composite policies take priority."
+        ),
     )
-

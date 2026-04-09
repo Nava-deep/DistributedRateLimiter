@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import suppress
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 from fastapi import FastAPI
@@ -12,9 +11,14 @@ from redis.exceptions import RedisError
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger, log_event
+from app.core.metrics import mark_redis_error
 from app.db.session import DatabaseSessionManager
 from app.middleware.observability import ObservabilityMiddleware
-from app.redis.client import close_redis_client, create_redis_client
+from app.redis.client import (
+    close_redis_client,
+    create_pubsub_redis_client,
+    create_redis_client,
+)
 from app.services.policy_cache import PolicySnapshotStore
 
 
@@ -50,33 +54,45 @@ async def run_startup_checks(app: FastAPI) -> dict[str, bool]:
 
 
 async def policy_refresh_listener(app: FastAPI) -> None:
-    pubsub = app.state.redis.pubsub()
-    await pubsub.subscribe(app.state.settings.policy_refresh_channel)
+    channel = app.state.settings.policy_refresh_channel
 
-    try:
-        async for message in pubsub.listen():
-            if message.get("type") != "message":
-                continue
-            await app.state.policy_snapshot.clear()
+    while True:
+        pubsub = app.state.redis_pubsub.pubsub()
+        try:
+            await pubsub.subscribe(channel)
+
+            async for message in pubsub.listen():
+                if message.get("type") != "message":
+                    continue
+
+                await app.state.policy_snapshot.clear()
+                log_event(
+                    app.state.logger,
+                    logging.INFO,
+                    "policy_refresh_received",
+                    payload=message.get("data"),
+                )
+        except asyncio.CancelledError:
+            raise
+        except RedisError as exc:
+            mark_redis_error("policy_refresh_listener")
             log_event(
                 app.state.logger,
-                logging.INFO,
-                "policy_refresh_received",
-                payload=message.get("data"),
+                logging.WARNING,
+                "redis_fallback",
+                operation="policy_refresh_listener",
+                error=str(exc),
             )
-    except asyncio.CancelledError:
-        raise
-    except (RedisError, TimeoutError):
-        return
-    finally:
-        with suppress(Exception):
-            await pubsub.unsubscribe(app.state.settings.policy_refresh_channel)
-        close_method = getattr(pubsub, "aclose", None)
-        with suppress(Exception):
-            if close_method is not None:
-                await close_method()
-            else:
-                await pubsub.close()
+            await asyncio.sleep(1.0)
+        finally:
+            with suppress(Exception):
+                await pubsub.unsubscribe(channel)
+            close_method = getattr(pubsub, "aclose", None)
+            with suppress(Exception):
+                if close_method is not None:
+                    await close_method()
+                else:
+                    await pubsub.close()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -90,6 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.logger = logger
         app.state.db = DatabaseSessionManager(settings.database_url)
         app.state.redis = create_redis_client(settings)
+        app.state.redis_pubsub = create_pubsub_redis_client(settings)
         app.state.policy_snapshot = PolicySnapshotStore()
         listener_task: asyncio.Task[Any] | None = None
 
@@ -97,6 +114,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.startup_status = startup_status
 
         if settings.strict_startup_checks and not all(startup_status.values()):
+            await close_redis_client(app.state.redis_pubsub)
             await close_redis_client(app.state.redis)
             await app.state.db.dispose()
             raise RuntimeError(f"Strict startup checks failed: {startup_status}")
@@ -120,8 +138,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 listener_task.cancel()
                 try:
                     await listener_task
-                except (asyncio.CancelledError, RedisError, TimeoutError):
+                except asyncio.CancelledError:
                     pass
+            await close_redis_client(app.state.redis_pubsub)
             await close_redis_client(app.state.redis)
             await app.state.db.dispose()
             log_event(
