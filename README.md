@@ -1,138 +1,312 @@
 # Distributed Rate Limiter
 
-A scalable, Redis-backed rate limiting system for APIs, built with FastAPI, PostgreSQL, and Docker.
+A distributed rate limiting service built with FastAPI, Redis, PostgreSQL, and Docker that enforces one shared quota across multiple API instances using atomic Redis coordination.
 
-## 1. Problem Statement
+## What This Project Is
 
-Rate limiting protects APIs from abuse and keeps systems stable under load.
+This project is a backend systems project focused on a real distributed-systems problem: how to enforce API rate limits correctly when traffic is spread across multiple stateless application servers.
 
-It helps with:
+The service supports:
 
-- preventing spam or brute-force style traffic
-- protecting backend services from overload
-- keeping access fair across users, IPs, and routes
-- smoothing bursts instead of letting one client consume all capacity
+- per-user limits
+- per-IP limits
+- per-route limits
+- composite limits such as `user_id + route`
+- multiple rate limiting algorithms
+- centralized policy management
+- shared distributed state
+- degraded behavior when Redis is unavailable
+- observability and reproducible synthetic benchmarking
 
-In a distributed system, rate limiting is harder because multiple API instances may handle requests for the same client at the same time. If each instance keeps its own counters, limits can be bypassed. This project solves that by keeping shared rate-limit state in Redis and making decisions atomically.
+The goal of the project is not only to block extra requests. The real goal is to do that correctly under concurrency, horizontal scaling, and dependency failures.
 
-## 2. Key Features
+## Why Rate Limiting Is Hard In Distributed Systems
 
-- Supports three algorithms:
-  - token bucket
-  - fixed window
-  - sliding window log
-- Token bucket is the default policy choice for production-style endpoints
-- Supports limits by:
-  - user ID
-  - IP address
-  - route
-  - composite selectors like `user_id + route`
-- Stores rate-limit policies in PostgreSQL
-- Caches active policies in Redis
-- Uses Redis Lua scripts for atomic, concurrency-safe updates
-- Returns `429 Too Many Requests` when blocked
-- Returns standard headers:
-  - `X-RateLimit-Limit`
-  - `X-RateLimit-Remaining`
-  - `X-RateLimit-Reset`
-  - `Retry-After`
-- Supports fail-open and fail-closed behavior when Redis is unavailable
-- Exposes admin APIs for policy CRUD
-- Includes Prometheus metrics, structured logs, Docker setup, and tests
+Rate limiting is easy to describe and easy to get wrong.
 
-## 3. System Architecture
+In a single process, an application can keep counters in memory and reject traffic once a threshold is reached. That approach stops working in a distributed deployment.
 
-```mermaid
-flowchart LR
-    Client["Client"] --> LB["Nginx / Direct API Access"]
-    LB --> API1["FastAPI Instance 1"]
-    LB --> API2["FastAPI Instance 2"]
+When there are multiple API instances:
 
-    API1 --> PG["PostgreSQL (policies)"]
-    API2 --> PG
+- the same user can hit different instances on consecutive requests
+- each instance sees only part of the traffic
+- local counters drift apart
+- concurrent requests can read the same state at the same time
+- naive read-then-write code can allow more requests than the configured limit
 
-    API1 --> Redis["Redis (shared rate-limit state)"]
-    API2 --> Redis
+That is why this project uses Redis as shared coordination infrastructure. Every instance reads and updates the same distributed state, and the critical rate-limit operation is executed atomically inside Redis.
 
-    Redis --> Decision["Allow / Block Decision"]
-    Decision --> API1
-    Decision --> API2
+## What The Service Does
 
-    Redis -. policy invalidation via pub/sub .-> API1
-    Redis -. policy invalidation via pub/sub .-> API2
-```
+This service exposes two groups of APIs:
 
-### What this means
+- admin APIs for creating, updating, listing, and deleting rate-limit policies
+- demo APIs that are protected by the distributed rate limiter
 
-- API servers are stateless with respect to rate-limit counters.
-- PostgreSQL stores the source-of-truth policies.
-- Redis stores shared counters and token state.
-- Every API instance checks the same Redis state, so limits still work correctly when traffic is spread across multiple containers or servers.
+Policies are stored in PostgreSQL and cached in Redis. When a request arrives, the service resolves the best matching policy, derives a deterministic Redis key, executes the selected algorithm atomically, and returns either:
 
-## 4. How It Works
+- `200` with rate-limit headers if the request is allowed
+- `429 Too Many Requests` with retry metadata if the request is blocked
 
-For each incoming request:
-
-1. The API extracts request identity:
-   - route template
-   - user ID from path or header
-   - client IP
-2. The policy service loads the best matching active policy.
-   - It first checks Redis cache.
-   - On a miss, it loads from PostgreSQL and refreshes the cache.
-3. The limiter generates a deterministic Redis key based on:
-   - policy ID
-   - policy version
-   - matching selectors such as route, user, or IP
-4. A Redis Lua script runs the selected algorithm atomically.
-5. The request is either:
-   - allowed, with rate-limit headers
-   - blocked with `429`, plus retry information
-
-If Redis is temporarily unavailable:
-
-- fail-open policies allow traffic
-- fail-closed policies reject traffic
-
-## 5. Algorithms Explained
+## Implemented Algorithms
 
 ### Token Bucket
 
-Think of this as a bucket of tokens that refills over time.
+Token bucket is the default production-oriented algorithm in this project.
 
-- Each request consumes one token.
-- If tokens are available, the request is allowed.
-- If the bucket is empty, the request is blocked.
+How it works:
+
+- each client or route has a bucket with a fixed capacity
+- tokens refill over time at a configured rate
+- each request consumes one token
+- if a token is available, the request is allowed
+- if no token is available, the request is blocked
 
 Why it is useful:
 
-- allows short bursts
-- still enforces a steady refill rate
-- feels natural for production APIs
+- supports burst traffic naturally
+- still limits sustained request rate
+- maps well to real API traffic patterns
 
 ### Fixed Window
 
-Requests are counted inside a fixed time window, such as 10 requests per minute.
+Fixed window counts requests inside a time bucket such as one minute.
 
-- easy to implement
-- cheap to store
-- can allow burstiness at window boundaries
+How it works:
+
+- requests are counted in a single discrete window
+- once the counter reaches the configured limit, later requests in that window are blocked
+- the counter resets at the next window boundary
+
+Tradeoff:
+
+- simple and cheap
+- can be unfair near window edges
 
 ### Sliding Window Log
 
-Each request timestamp is recorded and old entries are removed continuously.
+Sliding window log stores recent request timestamps and continuously drops old entries.
 
-- more accurate than fixed windows
-- prevents boundary spikes
-- costs more memory and Redis work
+How it works:
 
-### Interview takeaway
+- each request timestamp is recorded
+- timestamps outside the active window are removed
+- the number of remaining timestamps determines whether the next request is allowed
 
-- use fixed window when simplicity matters
-- use sliding window when fairness matters
-- use token bucket when you want controlled bursts plus good production behavior
+Tradeoff:
 
-## 6. Tech Stack
+- more accurate and fair than fixed window
+- more expensive in memory and Redis operations
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Client["Client"] --> LB["Nginx / Load Balancer"]
+    LB --> API1["FastAPI Instance 1"]
+    LB --> API2["FastAPI Instance 2"]
+
+    API1 --> Redis["Redis"]
+    API2 --> Redis
+
+    API1 --> PG["PostgreSQL"]
+    API2 --> PG
+
+    PG --> Policies["Rate-Limit Policies"]
+    Redis --> State["Shared Counters / Token State / Sliding Logs"]
+
+    Redis -. "Pub/Sub invalidation" .-> API1
+    Redis -. "Pub/Sub invalidation" .-> API2
+```
+
+### Component Roles
+
+#### FastAPI
+
+FastAPI handles HTTP traffic, exposes admin endpoints, applies rate limiting to protected routes, and returns standard rate-limit headers.
+
+#### PostgreSQL
+
+PostgreSQL is the source of truth for policy definitions. Policies can be created, updated, listed, and deleted through admin APIs.
+
+#### Redis
+
+Redis has two roles:
+
+- shared rate-limit state for counters, token buckets, and sliding-window logs
+- hot cache for active policies
+
+Redis is also used for pub/sub invalidation so that all API instances can refresh local policy snapshots when policy definitions change.
+
+#### Nginx
+
+Nginx is included as an optional reverse proxy to demonstrate how multiple API instances can sit behind one entrypoint while still enforcing a single shared quota.
+
+## How A Request Flows Through The System
+
+When a request hits a protected endpoint, the service follows this flow:
+
+1. Build request identity
+
+The service extracts the request attributes that matter for policy matching, such as:
+
+- route template
+- `user_id`
+- client IP
+- tenant ID
+- API key
+
+2. Resolve the best matching policy
+
+The policy service tries Redis cache first. If the policy cache is missing, it loads active policies from PostgreSQL and refreshes the cache. Policy matching supports scope precedence, so a specific rule such as `user_id + route` can override a general route-level rule.
+
+3. Build a deterministic Redis key
+
+The key includes the algorithm, policy ID, policy version, and the active selectors for that request. This ensures:
+
+- all API instances update the same shared key for the same quota
+- policy updates do not accidentally reuse old counters
+
+4. Execute the algorithm atomically
+
+The service uses Redis Lua scripts to apply the selected algorithm as one atomic operation. This prevents race conditions between parallel requests.
+
+5. Return the decision
+
+If the request is allowed, the service returns the resource along with:
+
+- `X-RateLimit-Limit`
+- `X-RateLimit-Remaining`
+- `X-RateLimit-Reset`
+- `Retry-After`
+
+If the request is blocked, it returns `429 Too Many Requests` with the same header set.
+
+## Why The Implementation Is Concurrency-Safe
+
+The central correctness problem is this:
+
+Two API instances can receive the same user’s request at almost the same time. If both instances read the current counter first and then both increment it separately, both requests may pass even when only one should.
+
+This project prevents that with Redis atomic execution.
+
+Instead of doing:
+
+- read current value
+- compute next value in application code
+- write updated value back
+
+the service executes the full state transition inside Redis with Lua.
+
+That matters because Redis guarantees that a Lua script runs atomically. While one script is executing, another script cannot interleave and corrupt the same state transition.
+
+That is the key distributed-systems property this project demonstrates.
+
+## Policy Model
+
+Each policy can define:
+
+- algorithm
+- limit or refill rate
+- window size
+- burst capacity
+- route selector
+- user selector
+- IP selector
+- tenant selector
+- API key selector
+- failure mode
+- priority
+
+This lets the service express both general and specific rules, for example:
+
+- all traffic to `/demo/protected`
+- one specific user on `/demo/user/{user_id}`
+- one forwarded IP on a protected route
+- one composite user-and-route policy overriding a route default
+
+## Reliability And Failure Handling
+
+A distributed system is not complete unless dependency failure is considered.
+
+This project includes degraded behavior for Redis failures:
+
+- fail-open for endpoints that should remain available even when Redis is unavailable
+- fail-closed for endpoints where protection is more important than availability
+
+It also includes:
+
+- Redis timeout handling
+- startup dependency checks for Redis and PostgreSQL
+- local policy snapshot fallback when Redis policy-cache reads fail
+- pub/sub invalidation for cache refresh
+- multi-instance correctness checks after an instance restart
+
+## Observability
+
+The project exposes Prometheus metrics for:
+
+- total HTTP requests
+- allowed requests
+- blocked requests
+- request latency
+- policy cache hits
+- policy cache misses
+- Redis errors
+
+These metrics make it possible to answer useful engineering questions:
+
+- how much traffic the service handled
+- how often requests were blocked
+- whether policy lookups are coming from cache or database
+- whether Redis is becoming an error source
+- how latency changes under synthetic load
+
+## Validation And Benchmarking
+
+This repository includes automated proof for both correctness and performance-related claims.
+
+### Correctness Coverage
+
+Automated tests cover:
+
+- token bucket refill correctness
+- fixed window reset behavior
+- sliding window correctness
+- key generation
+- policy precedence and matching
+- per-user enforcement
+- per-IP enforcement
+- per-route enforcement
+- composite enforcement
+- `429` behavior and headers
+- Redis unavailability behavior
+- Redis timeout behavior
+- policy cache miss and hit behavior
+- pub/sub invalidation
+- shared Redis state across multiple API instances
+- correctness under concurrent requests
+- correctness after instance restart
+
+### Synthetic Load Benchmarking
+
+The Locust-based benchmark workflow measures:
+
+- requests per second
+- average latency
+- p95 latency
+- allow count
+- block count
+- error count
+- number of API instances
+- number of concurrent virtual users
+- benchmark notes and environment context
+
+All benchmark runs are synthetic. They are useful for honest resume claims, but they should be described as synthetic benchmark results rather than production traffic.
+
+Results are written to timestamped folders under [`benchmark_results`](/Users/navadeepboyana/Documents/DistributedRateLimiter/benchmark_results).
+
+## Tech Stack
 
 - Python
 - FastAPI
@@ -140,106 +314,30 @@ Each request timestamp is recorded and old entries are removed continuously.
 - PostgreSQL
 - SQLAlchemy
 - Alembic
-- Docker + Docker Compose
+- Docker Compose
 - pytest
+- Locust
 - Prometheus
-- Optional Nginx reverse proxy
-- Locust load test profile
+- Nginx
 
-## 7. Getting Started
+## Running The Project
 
-### Clone the repository
+### Local Setup
 
 ```bash
 git clone https://github.com/Nava-deep/DistributedRateLimiter.git
 cd DistributedRateLimiter
-```
-
-### Set up local development
-
-```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
 cp .env.example .env
-```
-
-### Start dependencies
-
-```bash
 docker compose up -d postgres redis
-```
-
-### Run database migrations
-
-```bash
 alembic upgrade head
-```
-
-### Seed demo policies
-
-```bash
 python scripts/seed_demo_policies.py
-```
-
-### Start the API
-
-```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Run tests
-
-```bash
-pytest -q
-```
-
-### Run the stronger correctness suite
-
-```bash
-pytest -q tests/unit
-pytest -q tests/integration
-pytest -q tests/integration/test_distributed_coordination.py
-pytest -q tests/integration/test_policy_cache_and_pubsub.py
-```
-
-### Start the distributed demo with multiple API instances
-
-```bash
-docker compose up -d postgres redis
-docker compose run --rm migrate
-docker compose up --build api1 api2 nginx prometheus
-```
-
-Access points:
-
-- Nginx entrypoint: `http://localhost:8000`
-- API instance 1: `http://localhost:8001`
-- API instance 2: `http://localhost:8002`
-- Prometheus: `http://localhost:9090`
-
-## 8. Correctness Suite
-
-The test suite focuses on distributed correctness, not just happy-path API behavior.
-
-It covers:
-
-- token bucket refill math and burst handling
-- fixed window and sliding window correctness
-- deterministic Redis key generation
-- policy precedence and selector matching
-- per-user, per-IP, per-route, and composite enforcement
-- `429` responses and rate-limit headers
-- Redis fail-open and fail-closed behavior
-- Redis timeout and degraded-path behavior
-- policy cache miss and hit behavior
-- local snapshot fallback when Redis policy-cache reads fail
-- Redis pub/sub cache invalidation across app instances
-- concurrency safety under simultaneous requests
-- shared Redis state across multiple FastAPI instances
-- correctness after an instance restart against shared Redis state
-
-Recommended commands:
+### Run The Test Suites
 
 ```bash
 make test
@@ -249,11 +347,57 @@ make test-concurrency
 make test-failure
 ```
 
-If you want the strongest interview demo, run the full integration suite and then the benchmark workflow below.
+### Run Multi-Instance Deployment
 
-## 9. Example Usage
+```bash
+cp .env.example .env
+docker compose up -d postgres redis
+docker compose run --rm migrate
+docker compose up -d api1 api2 nginx prometheus
+```
 
-### Create a policy
+Entry points:
+
+- `http://localhost:8000` via Nginx
+- `http://localhost:8001` direct to API instance 1
+- `http://localhost:8002` direct to API instance 2
+- `http://localhost:9090` for Prometheus
+
+### Run Synthetic Benchmark
+
+```bash
+python scripts/run_benchmark.py \
+  --target-hosts http://localhost:8001,http://localhost:8002 \
+  --scenario shared-protected \
+  --users 80 \
+  --spawn-rate 20 \
+  --run-time 45s \
+  --api-instances 2 \
+  --notes "Synthetic benchmark run"
+```
+
+## API Endpoints
+
+Admin:
+
+- `POST /admin/policies`
+- `GET /admin/policies`
+- `GET /admin/policies/{id}`
+- `PUT /admin/policies/{id}`
+- `DELETE /admin/policies/{id}`
+
+Operational:
+
+- `GET /health`
+- `GET /metrics`
+
+Demo:
+
+- `GET /demo/public`
+- `GET /demo/protected`
+- `GET /demo/user/{user_id}`
+
+## Example Policy
 
 ```bash
 curl -X POST http://localhost:8000/admin/policies \
@@ -270,235 +414,30 @@ curl -X POST http://localhost:8000/admin/policies \
   }'
 ```
 
-### Call a protected endpoint
-
-```bash
-curl -i http://localhost:8000/demo/protected
-```
-
-Example successful response headers:
-
-```http
-X-RateLimit-Limit: 15
-X-RateLimit-Remaining: 14
-X-RateLimit-Reset: 1712345678
-Retry-After: 0
-```
-
-Example blocked response:
-
-```http
-HTTP/1.1 429 Too Many Requests
-X-RateLimit-Limit: 15
-X-RateLimit-Remaining: 0
-X-RateLimit-Reset: 1712345678
-Retry-After: 12
-```
-
-### Call a user-scoped endpoint
-
-```bash
-curl -i http://localhost:8000/demo/user/vip-user
-```
-
-### Useful endpoints
-
-- `POST /admin/policies`
-- `GET /admin/policies`
-- `GET /admin/policies/{id}`
-- `PUT /admin/policies/{id}`
-- `DELETE /admin/policies/{id}`
-- `GET /health`
-- `GET /metrics`
-- `GET /demo/public`
-- `GET /demo/protected`
-- `GET /demo/user/{user_id}`
-
-### Header explanation
-
-- `X-RateLimit-Limit`: total allowed capacity for the current policy
-- `X-RateLimit-Remaining`: how many requests are left
-- `X-RateLimit-Reset`: when the bucket or window resets
-- `Retry-After`: how long to wait before retrying
-
-## 10. Benchmarking and Load Testing
-
-This repository now includes a reproducible benchmark runner built around Locust.
-
-These runs are synthetic benchmarks generated by virtual clients. They are useful for proving correctness and measuring controlled throughput and latency, but they are not production traffic.
-
-What it measures:
-
-- correctness test count available in the repository at run time
-- total requests
-- allowed requests
-- blocked requests
-- error requests
-- average latency
-- p95 latency
-- requests per second
-- target host count and API instance count used for the run
-- scenario and environment notes
-
-### Benchmark scenarios
-
-- `shared-protected`: burst traffic against `/demo/protected`
-- `protected-burst`: single protected-route burst scenario
-- `user-hotspot`: repeated traffic for a hot user on `/demo/user/{user_id}`
-- `ip-hotspot`: repeated traffic from a single forwarded IP
-- `mixed`: public, protected, and user traffic mix
-
-### Run a benchmark against one entrypoint
-
-```bash
-make benchmark-report
-```
-
-Equivalent direct command:
-
-```bash
-python scripts/run_benchmark.py \
-  --target-hosts http://localhost:8000 \
-  --scenario shared-protected \
-  --users 80 \
-  --spawn-rate 20 \
-  --run-time 45s \
-  --api-instances 2 \
-  --notes "Docker compose on local machine behind nginx"
-```
-
-### Run a benchmark across multiple instance URLs directly
-
-```bash
-python scripts/run_benchmark.py \
-  --target-hosts http://localhost:8001,http://localhost:8002 \
-  --scenario shared-protected \
-  --users 80 \
-  --spawn-rate 20 \
-  --run-time 45s \
-  --api-instances 2 \
-  --notes "Round-robin benchmark against two app containers"
-```
-
-### Where results are written
-
-Each benchmark run writes a timestamped folder under `benchmark_results/` containing:
-
-- `summary.json`
-- `summary.md`
-- `metadata.json`
-- `status_counts.json`
-- `locust_stats.csv`
-- `locust_failures.csv`
-- `locust_exceptions.csv`
-- `locust_report.html`
-- raw stdout and stderr logs
-
-### Failure scenario suite
-
-The failure suite simulates controlled dependency and lifecycle problems without rewriting the service:
-
-- Redis unavailable
-- Redis timeout during limiter evaluation
-- Redis policy-cache read failure with local snapshot fallback
-- multi-instance behavior after one API instance is stopped and restarted
-
-Run it with:
-
-```bash
-make test-failure
-```
-
-### How to interpret the output
-
-- `correctness_test_count` is the number of collected automated tests available when the benchmark ran
-- `allowed_requests` is the count of successful requests, typically `2xx` or `3xx`
-- `blocked_requests` is the count of intentional `429` rate-limit responses
-- `error_requests` captures `5xx` responses and transport exceptions
-- `avg_latency_ms` and `p95_latency_ms` come from the final Locust shutdown summary
-- `requests_per_second` is the observed aggregate throughput during that run
-
-Safe resume guidance:
-
-- only use numbers from a saved `summary.json` or `summary.md`
-- explicitly describe them as synthetic load results
-- include the environment context, such as number of API instances and client concurrency
-- avoid quoting one-off terminal numbers that were not written to a benchmark result folder
-
-## 11. Concurrency & Distributed Safety
-
-This is the most important part of the project.
-
-The main challenge in distributed rate limiting is race conditions:
-
-- two API instances can receive requests for the same client at the same time
-- naive `GET` then `SET` logic can allow both requests through
-- local in-memory counters break as soon as traffic is spread across instances
-
-This project avoids that by using Redis Lua scripts.
-
-Each algorithm runs as a single atomic operation inside Redis:
-
-- fixed window: increment + expiry
-- sliding window log: evict old entries + count + add new request
-- token bucket: refill + consume token + persist updated state
-
-Why this works:
-
-- Redis executes a Lua script atomically
-- all API instances share the same Redis keys
-- policy version is part of the key, so updated policies do not reuse old counters
-- integration tests verify that simultaneous requests cannot bypass a limit, including multi-instance traffic against shared Redis
-
-## 12. Scaling
-
-The system is designed to scale horizontally.
-
-- API servers are stateless
-- rate-limit state is shared in Redis
-- policy definitions are shared through PostgreSQL
-- multiple FastAPI instances can sit behind a load balancer and still enforce the same limits
-
-This means you can increase API instances without breaking correctness, as long as they point to the same Redis and PostgreSQL backends.
-
-## 13. Design Decisions
-
-### Why Redis?
-
-Redis is a strong fit for distributed rate limiting because it offers:
-
-- low latency
-- shared centralized state
-- built-in atomic execution with Lua
-- data structures that fit counters, hashes, and sorted sets
-
-### Why PostgreSQL?
-
-Policies need durable storage and CRUD support. PostgreSQL is used as the source of truth for admin-managed policies.
-
-### Why token bucket as the default?
-
-Token bucket gives the best balance for API traffic:
-
-- supports bursts
-- still controls sustained traffic
-- behaves more naturally than hard fixed windows
-
-### Why cache policies in Redis too?
-
-Because the limiter needs fast policy lookups. PostgreSQL remains the source of truth, but Redis reduces lookup overhead and pub/sub helps invalidate stale policy caches.
-
-## 14. Future Improvements
-
-- multi-region rate limiting
-- edge or gateway-based enforcement
-- dynamic policy updates without admin API calls
-- Redis Cluster support
-- richer dashboards for policy usage
-- wildcard route matching and more advanced policy hierarchy
-
-## 15. Resume Highlights
-
-- Built a distributed rate limiter with FastAPI, Redis, and PostgreSQL that enforced per-user, per-IP, per-route, and composite policies across horizontally scaled API instances.
-- Implemented token bucket, fixed window, and sliding window log algorithms using Redis Lua scripts to guarantee concurrency-safe rate-limit decisions under simultaneous requests.
-- Designed policy CRUD, Redis caching, degraded fail-open/fail-closed behavior, Prometheus metrics, Dockerized deployment, correctness tests, and reproducible load benchmarking for a production-style backend systems project.
+## What This Project Demonstrates
+
+This project is meant to show the following engineering capabilities clearly:
+
+- backend API design
+- distributed shared-state coordination
+- concurrency-safe control logic
+- policy-driven system behavior
+- observability and failure handling
+- correctness-focused automated testing
+- reproducible synthetic performance validation
+
+## Interview Talking Points
+
+- Why local in-memory rate limiting breaks in horizontally scaled systems
+- Why Redis Lua scripts are safer than naive application-side increments
+- When token bucket is better than fixed window
+- Why policy versioning matters for distributed counters
+- How fail-open and fail-closed modes affect availability vs protection
+- How cache invalidation is handled across instances
+- How to talk honestly about synthetic benchmark results
+
+## Resume-Safe Bullet Templates
+
+- Built a distributed rate limiter that enforced shared quotas across `<instance_count>` FastAPI instances using Redis atomic coordination.
+- Implemented token bucket, fixed window, and sliding window algorithms with concurrency-safe Redis state transitions and policy-driven enforcement.
+- Validated distributed correctness with `<test_count>` automated tests covering concurrency, dependency failure, multi-instance coordination, and policy matching.
