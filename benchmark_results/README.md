@@ -11,4 +11,4 @@ When `scripts/run_benchmark.py` is executed, it creates timestamped subfolders h
 - raw Locust logs
 
 Most generated benchmark run folders remain gitignored to avoid committing every local run.
-The repository includes a committed sample benchmark run in `20260409T100908Z_shared-protected` so the output format is visible on GitHub.
+The repository includes one clean sample result set in `sample_multi_instance_benchmark` so the output format is easy to review on GitHub.

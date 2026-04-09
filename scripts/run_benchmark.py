@@ -16,6 +16,22 @@ import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RESULTS_DIR = ROOT / "benchmark_results"
+SCENARIO_ALIASES = {
+    "mixed": "mixed",
+    "shared-quota": "shared-protected",
+    "shared-protected": "shared-protected",
+    "burst-route": "protected-burst",
+    "protected-burst": "protected-burst",
+    "user-hotspot": "user-hotspot",
+    "ip-hotspot": "ip-hotspot",
+}
+SCENARIO_LABELS = {
+    "mixed": "mixed",
+    "shared-protected": "shared-quota",
+    "protected-burst": "burst-route",
+    "user-hotspot": "user-hotspot",
+    "ip-hotspot": "ip-hotspot",
+}
 
 
 @dataclass(slots=True)
@@ -49,8 +65,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--scenario",
-        choices=("mixed", "protected-burst", "user-hotspot", "ip-hotspot", "shared-protected"),
-        default="shared-protected",
+        default="shared-quota",
         help="Benchmark scenario to prepare and execute.",
     )
     parser.add_argument("--users", type=int, default=40, help="Concurrent Locust users.")
@@ -90,6 +105,22 @@ def parse_target_hosts(raw_hosts: str) -> list[str]:
     if not hosts:
         raise ValueError("At least one target host is required.")
     return hosts
+
+
+def normalize_scenario(raw_scenario: str) -> str:
+    try:
+        return SCENARIO_ALIASES[raw_scenario.strip().lower()]
+    except KeyError as exc:
+        valid_scenarios = ", ".join(
+            ["mixed", "shared-quota", "burst-route", "user-hotspot", "ip-hotspot"]
+        )
+        raise ValueError(
+            f"Unsupported scenario '{raw_scenario}'. Choose one of: {valid_scenarios}"
+        ) from exc
+
+
+def display_scenario_name(internal_scenario: str) -> str:
+    return SCENARIO_LABELS[internal_scenario]
 
 
 def benchmark_policy_payloads(scenario: str) -> Iterable[dict[str, Any]]:
@@ -402,13 +433,15 @@ def write_summary(result_dir: Path, summary: BenchmarkSummary) -> None:
 def main() -> int:
     args = parse_args()
     target_hosts = parse_target_hosts(args.target_hosts)
+    internal_scenario = normalize_scenario(args.scenario)
+    scenario_label = display_scenario_name(internal_scenario)
     correctness_test_count = collect_test_count()
-    result_dir = create_results_dir(Path(args.output_dir), args.scenario)
+    result_dir = create_results_dir(Path(args.output_dir), scenario_label)
 
     (result_dir / "metadata.json").write_text(
         json.dumps(
             {
-                "scenario": args.scenario,
+                "scenario": scenario_label,
                 "correctness_test_count": correctness_test_count,
                 "target_hosts": target_hosts,
                 "api_instances": args.api_instances,
@@ -425,18 +458,18 @@ def main() -> int:
     )
 
     if not args.skip_prepare:
-        prepare_benchmark_policies(target_hosts[0], args.admin_token, args.scenario)
+        prepare_benchmark_policies(target_hosts[0], args.admin_token, internal_scenario)
 
     run_locust(
         result_dir=result_dir,
         target_hosts=target_hosts,
-        scenario=args.scenario,
+        scenario=internal_scenario,
         users=args.users,
         spawn_rate=args.spawn_rate,
         run_time=args.run_time,
     )
     summary = summarize_result(
-        scenario=args.scenario,
+        scenario=scenario_label,
         correctness_test_count=correctness_test_count,
         target_hosts=target_hosts,
         api_instances=args.api_instances,

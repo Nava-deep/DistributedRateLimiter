@@ -16,5 +16,5 @@ build/
 benchmark_results/*
 !benchmark_results/.gitkeep
 !benchmark_results/README.md
-!benchmark_results/20260409T100908Z_shared-protected/
-!benchmark_results/20260409T100908Z_shared-protected/**
+!benchmark_results/sample_multi_instance_benchmark/
+!benchmark_results/sample_multi_instance_benchmark/**
