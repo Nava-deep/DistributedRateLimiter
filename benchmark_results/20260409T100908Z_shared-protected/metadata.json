@@ -1,0 +1,14 @@
+{
+  "scenario": "shared-protected",
+  "correctness_test_count": 48,
+  "target_hosts": [
+    "http://localhost:8001",
+    "http://localhost:8002"
+  ],
+  "api_instances": 2,
+  "concurrent_users": 6,
+  "spawn_rate": 3.0,
+  "run_time": "3s",
+  "notes": "synthetic validation smoke test",
+  "prepared_policies": true
+}

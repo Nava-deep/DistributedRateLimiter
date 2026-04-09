@@ -10,4 +10,5 @@ When `scripts/run_benchmark.py` is executed, it creates timestamped subfolders h
 - Locust CSV and HTML artifacts
 - raw Locust logs
 
-Generated benchmark run folders are intentionally gitignored. The directory itself is kept in the repository so the output location is visible.
+Most generated benchmark run folders remain gitignored to avoid committing every local run.
+The repository includes a committed sample benchmark run in `20260409T100908Z_shared-protected` so the output format is visible on GitHub.
