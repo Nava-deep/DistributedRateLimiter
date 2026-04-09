@@ -70,6 +70,22 @@ def test_token_bucket_blocks_when_empty() -> None:
 
 
 @pytest.mark.unit
+def test_token_bucket_refill_does_not_exceed_capacity() -> None:
+    state = TokenBucketState(tokens=1.0, last_refill_ms=0)
+
+    next_state, decision = apply_token_bucket(
+        now_ms=30_000,
+        state=state,
+        capacity=5,
+        refill_rate_per_second=10.0,
+    )
+
+    assert decision.allowed is True
+    assert next_state.tokens == pytest.approx(4.0)
+    assert decision.remaining == 4
+
+
+@pytest.mark.unit
 def test_fixed_window_counts_within_same_window() -> None:
     state = FixedWindowState(window_start_ms=0, count=0)
 
@@ -126,4 +142,3 @@ def test_sliding_window_blocks_at_limit() -> None:
     assert decision.allowed is False
     assert next_events == events
     assert decision.retry_after_ms == 50_000
-

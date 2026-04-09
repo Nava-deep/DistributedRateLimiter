@@ -194,6 +194,15 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 pytest -q
 ```
 
+### Run the stronger correctness suite
+
+```bash
+pytest -q tests/unit
+pytest -q tests/integration
+pytest -q tests/integration/test_distributed_coordination.py
+pytest -q tests/integration/test_policy_cache_and_pubsub.py
+```
+
 ### Start the distributed demo with multiple API instances
 
 ```bash
@@ -209,7 +218,36 @@ Access points:
 - API instance 2: `http://localhost:8002`
 - Prometheus: `http://localhost:9090`
 
-## 8. Example Usage
+## 8. Correctness Suite
+
+The test suite focuses on distributed correctness, not just happy-path API behavior.
+
+It covers:
+
+- token bucket refill math and burst handling
+- fixed window and sliding window correctness
+- deterministic Redis key generation
+- policy precedence and selector matching
+- per-user, per-IP, per-route, and composite enforcement
+- `429` responses and rate-limit headers
+- Redis fail-open and fail-closed behavior
+- policy cache miss and hit behavior
+- Redis pub/sub cache invalidation across app instances
+- concurrency safety under simultaneous requests
+- shared Redis state across multiple FastAPI instances
+
+Recommended commands:
+
+```bash
+pytest -q
+pytest -q -m unit
+pytest -q -m integration
+pytest -q tests/integration/test_distributed_coordination.py
+```
+
+If you want the strongest interview demo, run the full integration suite and then the benchmark workflow below.
+
+## 9. Example Usage
 
 ### Create a policy
 
@@ -279,7 +317,85 @@ curl -i http://localhost:8000/demo/user/vip-user
 - `X-RateLimit-Reset`: when the bucket or window resets
 - `Retry-After`: how long to wait before retrying
 
-## 9. Concurrency & Distributed Safety
+## 10. Benchmarking and Load Testing
+
+This repository now includes a reproducible benchmark runner built around Locust.
+
+What it measures:
+
+- total requests
+- allowed requests
+- blocked requests
+- error requests
+- average latency
+- p95 latency
+- requests per second
+- target host count and API instance count used for the run
+- scenario and environment notes
+
+### Benchmark scenarios
+
+- `shared-protected`: burst traffic against `/demo/protected`
+- `protected-burst`: single protected-route burst scenario
+- `user-hotspot`: repeated traffic for a hot user on `/demo/user/{user_id}`
+- `ip-hotspot`: repeated traffic from a single forwarded IP
+- `mixed`: public, protected, and user traffic mix
+
+### Run a benchmark against one entrypoint
+
+```bash
+python scripts/run_benchmark.py \
+  --target-hosts http://localhost:8000 \
+  --scenario shared-protected \
+  --users 80 \
+  --spawn-rate 20 \
+  --run-time 45s \
+  --api-instances 2 \
+  --notes "Docker compose on local machine behind nginx"
+```
+
+### Run a benchmark across multiple instance URLs directly
+
+```bash
+python scripts/run_benchmark.py \
+  --target-hosts http://localhost:8001,http://localhost:8002 \
+  --scenario shared-protected \
+  --users 80 \
+  --spawn-rate 20 \
+  --run-time 45s \
+  --api-instances 2 \
+  --notes "Round-robin benchmark against two app containers"
+```
+
+### Where results are written
+
+Each benchmark run writes a timestamped folder under `benchmark_results/` containing:
+
+- `summary.json`
+- `summary.md`
+- `metadata.json`
+- `status_counts.json`
+- `locust_stats.csv`
+- `locust_failures.csv`
+- `locust_exceptions.csv`
+- `locust_report.html`
+- raw stdout and stderr logs
+
+### How to interpret the output
+
+- `allowed_requests` is the count of successful requests, typically `2xx` or `3xx`
+- `blocked_requests` is the count of intentional `429` rate-limit responses
+- `error_requests` captures `5xx` responses and transport exceptions
+- `avg_latency_ms` and `p95_latency_ms` come from the final Locust shutdown summary
+- `requests_per_second` is the observed aggregate throughput during that run
+
+Safe resume guidance:
+
+- only use numbers from a saved `summary.json` or `summary.md`
+- include the environment context, such as number of API instances and client concurrency
+- avoid quoting one-off terminal numbers that were not written to a benchmark result folder
+
+## 11. Concurrency & Distributed Safety
 
 This is the most important part of the project.
 
@@ -302,9 +418,9 @@ Why this works:
 - Redis executes a Lua script atomically
 - all API instances share the same Redis keys
 - policy version is part of the key, so updated policies do not reuse old counters
-- integration tests verify that simultaneous requests cannot bypass a limit
+- integration tests verify that simultaneous requests cannot bypass a limit, including multi-instance traffic against shared Redis
 
-## 10. Scaling
+## 12. Scaling
 
 The system is designed to scale horizontally.
 
@@ -315,7 +431,7 @@ The system is designed to scale horizontally.
 
 This means you can increase API instances without breaking correctness, as long as they point to the same Redis and PostgreSQL backends.
 
-## 11. Design Decisions
+## 13. Design Decisions
 
 ### Why Redis?
 
@@ -342,7 +458,7 @@ Token bucket gives the best balance for API traffic:
 
 Because the limiter needs fast policy lookups. PostgreSQL remains the source of truth, but Redis reduces lookup overhead and pub/sub helps invalidate stale policy caches.
 
-## 12. Future Improvements
+## 14. Future Improvements
 
 - multi-region rate limiting
 - edge or gateway-based enforcement
@@ -351,8 +467,8 @@ Because the limiter needs fast policy lookups. PostgreSQL remains the source of 
 - richer dashboards for policy usage
 - wildcard route matching and more advanced policy hierarchy
 
-## 13. Resume Highlights
+## 15. Resume Highlights
 
 - Built a distributed rate limiter with FastAPI, Redis, and PostgreSQL that enforced per-user, per-IP, per-route, and composite policies across horizontally scaled API instances.
 - Implemented token bucket, fixed window, and sliding window log algorithms using Redis Lua scripts to guarantee concurrency-safe rate-limit decisions under simultaneous requests.
-- Designed policy CRUD, Redis caching, degraded fail-open/fail-closed behavior, Prometheus metrics, Dockerized deployment, and automated tests for a production-style backend systems project.
+- Designed policy CRUD, Redis caching, degraded fail-open/fail-closed behavior, Prometheus metrics, Dockerized deployment, correctness tests, and reproducible load benchmarking for a production-style backend systems project.

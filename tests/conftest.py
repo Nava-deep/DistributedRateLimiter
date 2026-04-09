@@ -26,6 +26,27 @@ def to_async_postgres_url(sync_url: str) -> str:
     return f"postgresql+asyncpg://{remainder}"
 
 
+def build_test_settings(
+    integration_urls: dict[str, str],
+    *,
+    app_instance_name: str = "test-instance",
+    **overrides,
+) -> Settings:
+    defaults = {
+        "project_name": "distributed-rate-limiter-test",
+        "environment": "test",
+        "app_instance_name": app_instance_name,
+        "database_url": integration_urls["database_url"],
+        "redis_url": integration_urls["redis_url"],
+        "admin_token": "integration-admin-token",
+        "strict_startup_checks": True,
+        "enable_policy_pubsub": True,
+        "log_level": "INFO",
+    }
+    defaults.update(overrides)
+    return Settings(**defaults)
+
+
 @pytest.fixture(scope="session")
 def postgres_container() -> PostgresContainer:
     container = PostgresContainer("postgres:16-alpine")
@@ -97,18 +118,21 @@ async def clean_datastores(run_migrations, integration_urls: dict[str, str]):
 
 @pytest_asyncio.fixture
 async def app(clean_datastores, integration_urls: dict[str, str]):
-    settings = Settings(
-        project_name="distributed-rate-limiter-test",
-        environment="test",
-        app_instance_name="test-instance",
-        database_url=integration_urls["database_url"],
-        redis_url=integration_urls["redis_url"],
-        admin_token="integration-admin-token",
-        strict_startup_checks=True,
-        enable_policy_pubsub=True,
-        log_level="INFO",
-    )
+    settings = build_test_settings(integration_urls)
     yield create_app(settings)
+
+
+@pytest_asyncio.fixture
+async def app_factory(clean_datastores, integration_urls: dict[str, str]):
+    def factory(*, app_instance_name: str, **overrides):
+        settings = build_test_settings(
+            integration_urls,
+            app_instance_name=app_instance_name,
+            **overrides,
+        )
+        return create_app(settings)
+
+    yield factory
 
 
 @pytest_asyncio.fixture

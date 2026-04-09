@@ -108,3 +108,29 @@ def test_build_rate_limit_key_omits_unused_selectors() -> None:
 
     assert key == "rl:fixed_window:policy-2:v1:ip=127.0.0.1"
 
+
+@pytest.mark.unit
+def test_build_rate_limit_key_supports_composite_user_route_and_api_key() -> None:
+    policy = SimpleNamespace(
+        id="policy-3",
+        version=4,
+        algorithm="sliding_window_log",
+        route="/demo/user/{user_id}",
+        user_id="alice",
+        ip_address=None,
+        tenant_id=None,
+        api_key="key-123",
+    )
+    request = build_request(
+        path="/demo/user/alice",
+        route_path="/demo/user/{user_id}",
+        path_params={"user_id": "alice"},
+        headers={"X-Api-Key": "key-123"},
+    )
+
+    key = build_rate_limit_key(policy, build_request_identity(request))
+
+    assert key == (
+        "rl:sliding_window_log:policy-3:v4:route=/demo/user/{user_id}:"
+        "user=alice:api_key=key-123"
+    )

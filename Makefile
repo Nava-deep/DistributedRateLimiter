@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
 
-.PHONY: install run lint test test-unit test-integration migrate seed-demo compose-up compose-down
+.PHONY: install run lint test test-unit test-integration migrate seed-demo compose-up compose-down benchmark
 
 install:
 	$(PIP) install -e ".[dev]"
@@ -33,3 +33,5 @@ compose-up:
 compose-down:
 	docker compose down --remove-orphans
 
+benchmark:
+	$(PYTHON) scripts/run_benchmark.py

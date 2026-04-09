@@ -114,3 +114,22 @@ def test_policy_matches_requires_all_non_null_selectors() -> None:
 
     assert policy_matches(policy, identity) is False
 
+
+@pytest.mark.unit
+def test_select_best_policy_prefers_higher_priority_for_same_scope() -> None:
+    identity = RequestIdentity(
+        route="/demo/protected",
+        user_id=None,
+        ip_address="127.0.0.1",
+        tenant_id=None,
+        api_key=None,
+    )
+    policies = [
+        DummyPolicy(name="low-priority", route="/demo/protected", priority=1),
+        DummyPolicy(name="high-priority", route="/demo/protected", priority=10),
+    ]
+
+    selected = select_best_policy(policies, identity)
+
+    assert selected is not None
+    assert selected.name == "high-priority"

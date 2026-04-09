@@ -13,4 +13,4 @@ build/
 *.pyo
 *.pyd
 .DS_Store
-
+benchmark_results/
