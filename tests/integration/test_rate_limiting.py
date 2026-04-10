@@ -143,3 +143,45 @@ async def test_user_specific_policy_overrides_route_default(client, admin_header
 
     assert [response.status_code for response in alice_responses] == [200, 200, 429]
     assert [response.status_code for response in bob_responses] == [200, 429]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_inactive_user_override_falls_back_to_route_default(client, admin_headers) -> None:
+    await client.post(
+        "/admin/policies",
+        json=policy_payload(
+            name="route-default-active",
+            algorithm="fixed_window",
+            route="/demo/user/{user_id}",
+            rate=1,
+        ),
+        headers=admin_headers,
+    )
+    await client.post(
+        "/admin/policies",
+        json=policy_payload(
+            name="alice-override-inactive",
+            algorithm="fixed_window",
+            route="/demo/user/{user_id}",
+            user_id="alice",
+            rate=3,
+            active=False,
+        ),
+        headers=admin_headers,
+    )
+
+    first = await client.get("/demo/user/alice")
+    second = await client.get("/demo/user/alice")
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_request_without_matching_policy_is_not_rate_limited(client) -> None:
+    response = await client.get("/demo/public")
+
+    assert response.status_code == 200
+    assert "X-RateLimit-Limit" not in response.headers

@@ -133,3 +133,28 @@ def test_select_best_policy_prefers_higher_priority_for_same_scope() -> None:
 
     assert selected is not None
     assert selected.name == "high-priority"
+
+
+@pytest.mark.unit
+def test_select_best_policy_ignores_inactive_matching_policy() -> None:
+    identity = RequestIdentity(
+        route="/demo/protected",
+        user_id="alice",
+        ip_address="127.0.0.1",
+        tenant_id=None,
+        api_key=None,
+    )
+    policies = [
+        DummyPolicy(
+            name="inactive-specific",
+            route="/demo/protected",
+            user_id="alice",
+            active=False,
+        ),
+        DummyPolicy(name="active-route", route="/demo/protected", active=True),
+    ]
+
+    selected = select_best_policy(policies, identity)
+
+    assert selected is not None
+    assert selected.name == "active-route"

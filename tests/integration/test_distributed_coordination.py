@@ -93,7 +93,7 @@ async def test_concurrent_burst_traffic_across_instances_matches_expected_counts
 
         response = await client_a.post(
             "/admin/policies",
-            json=protected_policy(name="shared-burst", rate=8, burst_capacity=8),
+            json=protected_policy(name="shared-burst", rate=12, burst_capacity=12),
             headers=admin_headers,
         )
         assert response.status_code == 201
@@ -103,7 +103,7 @@ async def test_concurrent_burst_traffic_across_instances_matches_expected_counts
             response = await client.get("/demo/protected")
             return response.status_code
 
-        status_codes = await asyncio.gather(*[hit_endpoint(index) for index in range(16)])
+        status_codes = await asyncio.gather(*[hit_endpoint(index) for index in range(36)])
 
-        assert status_codes.count(200) == 8
-        assert status_codes.count(429) == 8
+        assert status_codes.count(200) == 12
+        assert status_codes.count(429) == 24

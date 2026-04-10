@@ -63,6 +63,31 @@ def test_build_request_identity_uses_path_user_id() -> None:
 
 
 @pytest.mark.unit
+def test_build_request_identity_falls_back_to_header_user_id() -> None:
+    request = build_request(
+        path="/demo/protected",
+        route_path="/demo/protected",
+        headers={"X-User-Id": "header-user"},
+    )
+
+    identity = build_request_identity(request)
+
+    assert identity.user_id == "header-user"
+    assert identity.route == "/demo/protected"
+
+
+@pytest.mark.unit
+def test_extract_client_ip_falls_back_to_request_client_host() -> None:
+    request = build_request(
+        path="/demo/public",
+        route_path="/demo/public",
+        client_host="10.1.2.3",
+    )
+
+    assert extract_client_ip(request) == "10.1.2.3"
+
+
+@pytest.mark.unit
 def test_build_rate_limit_key_includes_policy_version_and_selectors() -> None:
     policy = SimpleNamespace(
         id="policy-1",

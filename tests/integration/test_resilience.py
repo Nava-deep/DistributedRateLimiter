@@ -78,9 +78,9 @@ async def test_concurrent_requests_do_not_bypass_limit(client, admin_headers) ->
         json={
             "name": "concurrent-protected",
             "algorithm": "token_bucket",
-            "rate": 10,
+            "rate": 25,
             "window_seconds": 60,
-            "burst_capacity": 10,
+            "burst_capacity": 25,
             "route": "/demo/protected",
             "failure_mode": "fail_closed",
         },
@@ -91,7 +91,7 @@ async def test_concurrent_requests_do_not_bypass_limit(client, admin_headers) ->
         response = await client.get("/demo/protected")
         return response.status_code
 
-    status_codes = await asyncio.gather(*[hit_endpoint() for _ in range(20)])
+    status_codes = await asyncio.gather(*[hit_endpoint() for _ in range(50)])
 
-    assert status_codes.count(200) == 10
-    assert status_codes.count(429) == 10
+    assert status_codes.count(200) == 25
+    assert status_codes.count(429) == 25

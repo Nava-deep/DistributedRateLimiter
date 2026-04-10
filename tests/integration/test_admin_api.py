@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 
 
@@ -108,3 +110,21 @@ async def test_delete_policy_removes_it(client, admin_headers) -> None:
 
     assert delete_response.status_code == 204
     assert get_response.status_code == 404
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_admin_endpoints_require_valid_token(client) -> None:
+    response = await client.get("/admin/policies")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Missing or invalid admin token."
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_get_missing_policy_returns_404(client, admin_headers) -> None:
+    response = await client.get(f"/admin/policies/{uuid4()}", headers=admin_headers)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Policy not found."

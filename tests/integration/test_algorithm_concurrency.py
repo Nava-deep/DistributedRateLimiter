@@ -37,16 +37,16 @@ async def test_token_bucket_parallel_requests_match_exact_capacity(client, admin
             name="token-bucket-concurrency",
             algorithm="token_bucket",
             route="/demo/protected",
-            rate=6,
-            burst_capacity=6,
+            rate=10,
+            burst_capacity=10,
         ),
         headers=admin_headers,
     )
 
-    responses = await asyncio.gather(*[client.get("/demo/protected") for _ in range(12)])
+    responses = await asyncio.gather(*[client.get("/demo/protected") for _ in range(30)])
 
-    assert [response.status_code for response in responses].count(200) == 6
-    assert [response.status_code for response in responses].count(429) == 6
+    assert [response.status_code for response in responses].count(200) == 10
+    assert [response.status_code for response in responses].count(429) == 20
 
 
 @pytest.mark.integration
@@ -59,15 +59,15 @@ async def test_fixed_window_parallel_requests_do_not_exceed_limit(client, admin_
             name="fixed-window-concurrency",
             algorithm="fixed_window",
             route="/demo/public",
-            rate=5,
+            rate=8,
         ),
         headers=admin_headers,
     )
 
-    responses = await asyncio.gather(*[client.get("/demo/public") for _ in range(10)])
+    responses = await asyncio.gather(*[client.get("/demo/public") for _ in range(24)])
 
-    assert [response.status_code for response in responses].count(200) == 5
-    assert [response.status_code for response in responses].count(429) == 5
+    assert [response.status_code for response in responses].count(200) == 8
+    assert [response.status_code for response in responses].count(429) == 16
 
 
 @pytest.mark.integration
@@ -80,12 +80,12 @@ async def test_sliding_window_parallel_requests_do_not_exceed_limit(client, admi
             name="sliding-window-concurrency",
             algorithm="sliding_window_log",
             route="/demo/user/{user_id}",
-            rate=4,
+            rate=6,
         ),
         headers=admin_headers,
     )
 
-    responses = await asyncio.gather(*[client.get("/demo/user/alice") for _ in range(8)])
+    responses = await asyncio.gather(*[client.get("/demo/user/alice") for _ in range(18)])
 
-    assert [response.status_code for response in responses].count(200) == 4
-    assert [response.status_code for response in responses].count(429) == 4
+    assert [response.status_code for response in responses].count(200) == 6
+    assert [response.status_code for response in responses].count(429) == 12

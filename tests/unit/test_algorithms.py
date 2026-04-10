@@ -86,6 +86,20 @@ def test_token_bucket_refill_does_not_exceed_capacity() -> None:
 
 
 @pytest.mark.unit
+def test_token_bucket_starts_full_when_state_is_missing() -> None:
+    next_state, decision = apply_token_bucket(
+        now_ms=1_000,
+        state=None,
+        capacity=4,
+        refill_rate_per_second=1.0,
+    )
+
+    assert decision.allowed is True
+    assert next_state.tokens == pytest.approx(3.0)
+    assert decision.remaining == 3
+
+
+@pytest.mark.unit
 def test_fixed_window_counts_within_same_window() -> None:
     state = FixedWindowState(window_start_ms=0, count=0)
 
@@ -111,6 +125,22 @@ def test_fixed_window_resets_on_next_window() -> None:
     assert decision.allowed is True
     assert next_state.window_start_ms == 60_000
     assert next_state.count == 1
+
+
+@pytest.mark.unit
+def test_fixed_window_blocks_until_current_window_expires() -> None:
+    state = FixedWindowState(window_start_ms=0, count=2)
+
+    next_state, decision = apply_fixed_window(
+        now_ms=59_500,
+        state=state,
+        limit=2,
+        window_seconds=60,
+    )
+
+    assert decision.allowed is False
+    assert next_state.count == 2
+    assert decision.retry_after_ms == 500
 
 
 @pytest.mark.unit
@@ -142,3 +172,19 @@ def test_sliding_window_blocks_at_limit() -> None:
     assert decision.allowed is False
     assert next_events == events
     assert decision.retry_after_ms == 50_000
+
+
+@pytest.mark.unit
+def test_sliding_window_reset_tracks_oldest_active_event() -> None:
+    events = [15_000, 50_000]
+
+    next_events, decision = apply_sliding_window_log(
+        now_ms=55_000,
+        events_ms=events,
+        limit=3,
+        window_seconds=60,
+    )
+
+    assert decision.allowed is True
+    assert next_events == [15_000, 50_000, 55_000]
+    assert decision.reset_at_ms == 75_000
