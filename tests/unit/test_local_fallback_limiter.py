@@ -108,3 +108,55 @@ async def test_local_fallback_sliding_window_drops_expired_events() -> None:
         False,
         True,
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_local_fallback_clear_resets_internal_state() -> None:
+    limiter = LocalFallbackLimiter()
+    policy = build_policy(rate=1, burst_capacity=1)
+    identity = build_identity()
+
+    first = await limiter.apply(policy, identity, now_ms=0)
+    second = await limiter.apply(policy, identity, now_ms=1)
+    await limiter.clear()
+    third = await limiter.apply(policy, identity, now_ms=2)
+
+    assert first.allowed is True
+    assert second.allowed is False
+    assert third.allowed is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_local_fallback_isolates_state_by_key() -> None:
+    limiter = LocalFallbackLimiter()
+    protected_policy = build_policy(rate=1, burst_capacity=1, route="/demo/protected")
+    public_policy = build_policy(rate=1, burst_capacity=1, route="/demo/public")
+
+    protected_identity = build_identity(route="/demo/protected")
+    public_identity = build_identity(route="/demo/public")
+
+    protected_first = await limiter.apply(protected_policy, protected_identity, now_ms=0)
+    protected_second = await limiter.apply(protected_policy, protected_identity, now_ms=1)
+    public_first = await limiter.apply(public_policy, public_identity, now_ms=1)
+
+    assert protected_first.allowed is True
+    assert protected_second.allowed is False
+    assert public_first.allowed is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_local_fallback_evicts_expired_state_before_next_request() -> None:
+    limiter = LocalFallbackLimiter(state_ttl_seconds=1)
+    policy = build_policy(rate=1, burst_capacity=1)
+    identity = build_identity()
+
+    first = await limiter.apply(policy, identity, now_ms=0)
+    second = await limiter.apply(policy, identity, now_ms=50)
+    third = await limiter.apply(policy, identity, now_ms=122_000)
+
+    assert first.allowed is True
+    assert second.allowed is False
+    assert third.allowed is True

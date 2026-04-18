@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
@@ -50,3 +51,25 @@ async def test_require_admin_token_rejects_invalid_token() -> None:
 
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "Missing or invalid admin token."
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_require_admin_token_uses_constant_time_compare() -> None:
+    request = build_request("secret-token")
+
+    with patch("app.core.security.compare_digest", return_value=True) as compare_digest:
+        await require_admin_token(request)
+
+    compare_digest.assert_called_once_with("secret-token", "secret-token")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_require_admin_token_rejects_case_mismatched_token() -> None:
+    request = build_request("Secret-Token")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await require_admin_token(request)
+
+    assert exc_info.value.status_code == 401

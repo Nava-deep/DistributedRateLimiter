@@ -97,3 +97,38 @@ async def test_health_service_can_report_both_dependencies_unhealthy(monkeypatch
     assert response.redis.ok is False
     assert response.postgres.details == "postgres unreachable"
     assert response.redis.details == "redis unreachable"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_health_service_reports_human_readable_success_messages(monkeypatch) -> None:
+    service = build_service()
+
+    async def ping_redis(redis_client: object) -> bool:
+        return True
+
+    monkeypatch.setattr("app.services.health_service.ping_redis", ping_redis)
+
+    response = await service.get_health()
+
+    assert response.postgres.details == "postgres reachable"
+    assert response.redis.details == "redis reachable"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_health_service_calls_both_dependency_checks(monkeypatch) -> None:
+    db_manager = AsyncMock()
+    service = build_service(db_manager=db_manager)
+    redis_calls = {"count": 0}
+
+    async def ping_redis(redis_client: object) -> bool:
+        redis_calls["count"] += 1
+        return True
+
+    monkeypatch.setattr("app.services.health_service.ping_redis", ping_redis)
+
+    await service.get_health()
+
+    db_manager.ping.assert_awaited_once()
+    assert redis_calls["count"] == 1

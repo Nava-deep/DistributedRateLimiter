@@ -97,3 +97,34 @@ async def test_policy_snapshot_store_clear_removes_cached_snapshot(monkeypatch) 
     await store.clear()
 
     assert await store.get_fresh(ttl_seconds=30) is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_policy_snapshot_store_treats_boundary_age_as_fresh(monkeypatch) -> None:
+    store = PolicySnapshotStore()
+    monkeypatch.setattr("app.services.policy_cache.monotonic", lambda: 500.0)
+    await store.set([build_policy("boundary-policy")])
+
+    monkeypatch.setattr("app.services.policy_cache.monotonic", lambda: 530.0)
+    policies = await store.get_fresh(ttl_seconds=30)
+
+    assert policies is not None
+    assert [policy.name for policy in policies] == ["boundary-policy"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_policy_snapshot_store_replaces_older_snapshot_when_set_again(monkeypatch) -> None:
+    store = PolicySnapshotStore()
+    monkeypatch.setattr("app.services.policy_cache.monotonic", lambda: 600.0)
+    await store.set([build_policy("first-policy")])
+
+    monkeypatch.setattr("app.services.policy_cache.monotonic", lambda: 605.0)
+    await store.set([build_policy("second-policy")])
+
+    monkeypatch.setattr("app.services.policy_cache.monotonic", lambda: 610.0)
+    policies = await store.get_fresh(ttl_seconds=30)
+
+    assert policies is not None
+    assert [policy.name for policy in policies] == ["second-policy"]
