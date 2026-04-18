@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import time
@@ -10,12 +11,20 @@ from typing import Any
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
+from app.core.config import Settings
 from app.core.logging import log_event
-from app.core.metrics import mark_rate_limit_allowed, mark_rate_limit_blocked, mark_redis_error
+from app.core.metrics import (
+    mark_local_failover,
+    mark_rate_limit_allowed,
+    mark_rate_limit_blocked,
+    mark_redis_error,
+    mark_redis_retry,
+)
 from app.models.policy import FailureMode, RateLimitAlgorithm
 from app.redis.scripts import FIXED_WINDOW_LUA, SLIDING_WINDOW_LOG_LUA, TOKEN_BUCKET_LUA
 from app.schemas.policy import PolicyRead
 from app.services.key_builder import RequestIdentity, build_rate_limit_key
+from app.services.local_fallback_limiter import LocalFallbackLimiter
 from app.services.policy_service import PolicyService
 
 
@@ -27,6 +36,7 @@ class RateLimitDecision:
     reset_at_epoch_seconds: int
     retry_after_seconds: int
     degraded: bool = False
+    local_fallback: bool = False
 
     @property
     def headers(self) -> dict[str, str]:
@@ -45,10 +55,14 @@ class RateLimiterService:
         policy_service: PolicyService,
         redis_client: Redis,
         logger: logging.Logger,
+        settings: Settings,
+        local_fallback_limiter: LocalFallbackLimiter,
     ) -> None:
         self.policy_service = policy_service
         self.redis_client = redis_client
         self.logger = logger
+        self.settings = settings
+        self.local_fallback_limiter = local_fallback_limiter
 
     async def evaluate(
         self,
@@ -58,19 +72,33 @@ class RateLimiterService:
         if policy is None:
             return None, None
 
-        try:
-            decision = await self._run_policy(policy, identity)
-        except RedisError as exc:
-            mark_redis_error("rate_limit_apply")
-            log_event(
-                self.logger,
-                logging.WARNING,
-                "redis_fallback",
-                operation="rate_limit_apply",
-                policy_name=policy.name,
-                error=str(exc),
-            )
-            decision = self._build_degraded_decision(policy)
+        decision: RateLimitDecision
+        max_attempts = max(1, self.settings.redis_retry_attempts + 1)
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                decision = await self._run_policy(policy, identity)
+                break
+            except RedisError as exc:
+                mark_redis_error("rate_limit_apply")
+                if attempt < max_attempts:
+                    mark_redis_retry("rate_limit_apply")
+                    log_event(
+                        self.logger,
+                        logging.WARNING,
+                        "redis_retry_scheduled",
+                        operation="rate_limit_apply",
+                        policy_name=policy.name,
+                        attempt=attempt,
+                        max_attempts=max_attempts,
+                        error=str(exc),
+                    )
+                    if self.settings.redis_retry_backoff_ms > 0:
+                        await asyncio.sleep(self.settings.redis_retry_backoff_ms / 1000)
+                    continue
+
+                decision = await self._recover_after_redis_failure(policy, identity, exc)
+                break
 
         if decision.allowed:
             mark_rate_limit_allowed(str(policy.algorithm), policy.selector_kind)
@@ -98,6 +126,46 @@ class RateLimiterService:
             )
 
         return decision, policy
+
+    async def _recover_after_redis_failure(
+        self,
+        policy: PolicyRead,
+        identity: RequestIdentity,
+        exc: RedisError,
+    ) -> RateLimitDecision:
+        if self.settings.enable_local_fallback_limiter:
+            fallback_result = await self.local_fallback_limiter.apply(policy, identity)
+            mark_local_failover(str(policy.algorithm), policy.selector_kind)
+            log_event(
+                self.logger,
+                logging.WARNING,
+                "failover_local_limiter",
+                message="[FAILOVER] Switching to local in-memory limiter",
+                operation="rate_limit_apply",
+                policy_name=policy.name,
+                algorithm=str(policy.algorithm),
+                selector_kind=policy.selector_kind,
+                error=str(exc),
+            )
+            return RateLimitDecision(
+                allowed=fallback_result.allowed,
+                limit=fallback_result.limit,
+                remaining=fallback_result.remaining,
+                reset_at_epoch_seconds=fallback_result.reset_at_epoch_seconds,
+                retry_after_seconds=fallback_result.retry_after_seconds,
+                degraded=True,
+                local_fallback=True,
+            )
+
+        log_event(
+            self.logger,
+            logging.WARNING,
+            "redis_fallback",
+            operation="rate_limit_apply",
+            policy_name=policy.name,
+            error=str(exc),
+        )
+        return self._build_degraded_decision(policy)
 
     async def _run_policy(self, policy: PolicyRead, identity: RequestIdentity) -> RateLimitDecision:
         key = build_rate_limit_key(policy, identity)

@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     )
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     redis_socket_timeout_seconds: float = Field(
-        default=0.2,
+        default=1.0,
         alias="REDIS_SOCKET_TIMEOUT_SECONDS",
     )
     admin_token: str = Field(default="change-me", alias="ADMIN_TOKEN")
@@ -38,6 +38,16 @@ class Settings(BaseSettings):
     )
     strict_startup_checks: bool = Field(default=False, alias="STRICT_STARTUP_CHECKS")
     enable_policy_pubsub: bool = Field(default=True, alias="ENABLE_POLICY_PUBSUB")
+    enable_local_fallback_limiter: bool = Field(
+        default=False,
+        alias="ENABLE_LOCAL_FALLBACK_LIMITER",
+    )
+    local_fallback_state_ttl_seconds: int = Field(
+        default=120,
+        alias="LOCAL_FALLBACK_STATE_TTL_SECONDS",
+    )
+    redis_retry_attempts: int = Field(default=1, alias="REDIS_RETRY_ATTEMPTS")
+    redis_retry_backoff_ms: int = Field(default=25, alias="REDIS_RETRY_BACKOFF_MS")
     request_timeout_seconds: float = Field(default=1.0, alias="REQUEST_TIMEOUT_SECONDS")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
@@ -53,4 +63,3 @@ def get_settings() -> Settings:
 
 def clear_settings_cache() -> None:
     get_settings.cache_clear()
-

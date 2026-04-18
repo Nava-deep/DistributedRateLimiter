@@ -49,6 +49,34 @@ async def main() -> None:
             user_id="vip-user",
             failure_mode="fail_closed",
         ),
+        PolicyCreate(
+            name="platform-auth-service",
+            description="Platform auth service login throttling policy.",
+            algorithm="token_bucket",
+            rate=25,
+            window_seconds=60,
+            burst_capacity=25,
+            route="/services/auth/session",
+            failure_mode="fail_closed",
+        ),
+        PolicyCreate(
+            name="platform-payments-service",
+            description="Platform payments service authorization policy.",
+            algorithm="sliding_window_log",
+            rate=12,
+            window_seconds=60,
+            route="/services/payments/authorize",
+            failure_mode="fail_closed",
+        ),
+        PolicyCreate(
+            name="platform-search-service",
+            description="Platform search service query throttling policy.",
+            algorithm="fixed_window",
+            rate=40,
+            window_seconds=60,
+            route="/services/search/query",
+            failure_mode="fail_closed",
+        ),
     ]
 
     try:

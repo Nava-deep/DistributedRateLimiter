@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from redis.exceptions import RedisError
 
 
 def protected_policy(name: str = "ops-protected", rate: int = 1) -> dict[str, object]:
@@ -74,3 +75,36 @@ async def test_metrics_endpoint_exposes_policy_cache_metrics_after_requests(
     assert metrics_response.status_code == 200
     assert "distributed_rate_limiter_policy_cache_hits_total" in metrics_response.text
     assert "distributed_rate_limiter_policy_cache_misses_total" in metrics_response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_metrics_endpoint_exposes_failover_and_retry_counters(
+    client,
+    app,
+    admin_headers,
+    monkeypatch,
+) -> None:
+    await client.post(
+        "/admin/policies",
+        json=protected_policy(name="metrics-failover-policy", rate=1),
+        headers=admin_headers,
+    )
+    monkeypatch.setattr(app.state.settings, "enable_local_fallback_limiter", True)
+    monkeypatch.setattr(app.state.settings, "redis_retry_attempts", 1)
+    attempts = {"count": 0}
+
+    async def flaky_eval(*args, **kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RedisError("temporary redis failure")
+        raise RedisError("persistent redis failure")
+
+    monkeypatch.setattr(app.state.redis, "eval", flaky_eval)
+
+    await client.get("/demo/protected")
+    metrics_response = await client.get("/metrics")
+
+    assert metrics_response.status_code == 200
+    assert "distributed_rate_limiter_local_failover_total" in metrics_response.text
+    assert "distributed_rate_limiter_redis_retries_total" in metrics_response.text

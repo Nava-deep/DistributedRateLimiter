@@ -24,6 +24,7 @@ SCENARIO_ALIASES = {
     "protected-burst": "protected-burst",
     "user-hotspot": "user-hotspot",
     "ip-hotspot": "ip-hotspot",
+    "platform-services": "platform-services",
 }
 SCENARIO_LABELS = {
     "mixed": "mixed",
@@ -31,6 +32,7 @@ SCENARIO_LABELS = {
     "protected-burst": "burst-route",
     "user-hotspot": "user-hotspot",
     "ip-hotspot": "ip-hotspot",
+    "platform-services": "platform-services",
 }
 
 
@@ -112,7 +114,14 @@ def normalize_scenario(raw_scenario: str) -> str:
         return SCENARIO_ALIASES[raw_scenario.strip().lower()]
     except KeyError as exc:
         valid_scenarios = ", ".join(
-            ["mixed", "shared-quota", "burst-route", "user-hotspot", "ip-hotspot"]
+            [
+                "mixed",
+                "shared-quota",
+                "burst-route",
+                "user-hotspot",
+                "ip-hotspot",
+                "platform-services",
+            ]
         )
         raise ValueError(
             f"Unsupported scenario '{raw_scenario}'. Choose one of: {valid_scenarios}"
@@ -163,6 +172,37 @@ def benchmark_policy_payloads(scenario: str) -> Iterable[dict[str, Any]]:
                 "ip_address": "203.0.113.10",
                 "failure_mode": "fail_closed",
             }
+        ]
+    if scenario == "platform-services":
+        return [
+            {
+                "name": "benchmark-auth-service",
+                "description": "Benchmark policy for the auth platform service.",
+                "algorithm": "token_bucket",
+                "rate": 80,
+                "window_seconds": 60,
+                "burst_capacity": 80,
+                "route": "/services/auth/session",
+                "failure_mode": "fail_closed",
+            },
+            {
+                "name": "benchmark-payments-service",
+                "description": "Benchmark policy for the payments platform service.",
+                "algorithm": "sliding_window_log",
+                "rate": 45,
+                "window_seconds": 60,
+                "route": "/services/payments/authorize",
+                "failure_mode": "fail_closed",
+            },
+            {
+                "name": "benchmark-search-service",
+                "description": "Benchmark policy for the search platform service.",
+                "algorithm": "fixed_window",
+                "rate": 120,
+                "window_seconds": 60,
+                "route": "/services/search/query",
+                "failure_mode": "fail_closed",
+            },
         ]
     return [
         {

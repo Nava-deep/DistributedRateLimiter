@@ -120,3 +120,55 @@ class RateLimiterUser(HttpUser):
         if SCENARIO not in {"protected-burst", "shared-protected"}:
             return
         self._request("/demo/protected", name="/demo/protected[burst]")
+
+    @task(3)
+    def auth_service_endpoint(self) -> None:
+        if SCENARIO != "platform-services":
+            return
+        url = f"{_selected_base_url(self.host)}/services/auth/session"
+        try:
+            with self.client.post(
+                url,
+                headers=self._headers(),
+                name="/services/auth/session",
+                catch_response=True,
+            ) as response:
+                _record_status(response.status_code)
+                if response.status_code == 429:
+                    response.failure("rate_limit_blocked")
+                elif response.status_code >= 500:
+                    response.failure(f"unexpected server error {response.status_code}")
+                else:
+                    response.success()
+        except Exception:
+            _record_status("EXCEPTION")
+            raise
+
+    @task(2)
+    def payments_service_endpoint(self) -> None:
+        if SCENARIO != "platform-services":
+            return
+        url = f"{_selected_base_url(self.host)}/services/payments/authorize"
+        try:
+            with self.client.post(
+                url,
+                headers=self._headers(),
+                name="/services/payments/authorize",
+                catch_response=True,
+            ) as response:
+                _record_status(response.status_code)
+                if response.status_code == 429:
+                    response.failure("rate_limit_blocked")
+                elif response.status_code >= 500:
+                    response.failure(f"unexpected server error {response.status_code}")
+                else:
+                    response.success()
+        except Exception:
+            _record_status("EXCEPTION")
+            raise
+
+    @task(4)
+    def search_service_endpoint(self) -> None:
+        if SCENARIO != "platform-services":
+            return
+        self._request("/services/search/query", name="/services/search/query")

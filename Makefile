@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
 
-.PHONY: install run lint test test-unit test-integration test-concurrency test-failure migrate seed-demo compose-up compose-down benchmark benchmark-report
+.PHONY: install run lint test test-unit test-integration test-concurrency test-failure migrate seed-demo compose-up compose-down benchmark benchmark-report simulate-multi-region
 
 install:
 	$(PIP) install -e ".[dev]"
@@ -44,3 +44,6 @@ benchmark:
 
 benchmark-report:
 	$(PYTHON) scripts/run_benchmark.py --notes "Synthetic benchmark run"
+
+simulate-multi-region:
+	$(PYTHON) scripts/run_multi_region_simulation.py

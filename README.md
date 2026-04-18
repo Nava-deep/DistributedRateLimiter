@@ -1,6 +1,6 @@
 # Distributed Rate Limiter
 
-A distributed rate limiting service built with FastAPI, Redis, PostgreSQL, and Docker that enforces one shared quota across multiple API instances using atomic Redis coordination.
+A distributed rate limiting service built with FastAPI, Redis, PostgreSQL, and Docker that enforces one shared quota across multiple API instances using atomic Redis coordination, explicit failover behavior, and platform-style service integration.
 
 ## What This Project Is
 
@@ -16,6 +16,9 @@ The service supports:
 - centralized policy management
 - shared distributed state
 - degraded behavior when Redis is unavailable
+- local in-memory failover when Redis is unavailable
+- platform-style service routes for auth, payments, and search
+- India and US multi-region consistency simulation
 - observability and reproducible synthetic benchmarking
 
 The goal of the project is not only to block extra requests. The real goal is to do that correctly under concurrency, horizontal scaling, and dependency failures.
@@ -38,15 +41,22 @@ That is why this project uses Redis as shared coordination infrastructure. Every
 
 ## What The Service Does
 
-This service exposes two groups of APIs:
+This service exposes three groups of APIs:
 
 - admin APIs for creating, updating, listing, and deleting rate-limit policies
 - demo APIs that are protected by the distributed rate limiter
+- dummy platform service APIs for auth, payments, and search
 
 Policies are stored in PostgreSQL and cached in Redis. When a request arrives, the service resolves the best matching policy, derives a deterministic Redis key, executes the selected algorithm atomically, and returns either:
 
 - `200` with rate-limit headers if the request is allowed
 - `429 Too Many Requests` with retry metadata if the request is blocked
+
+If Redis is unavailable, the service can:
+
+- retry the Redis operation for transient failures
+- switch to a local in-memory limiter on the current instance
+- fall back to fail-open or fail-closed behavior when local failover is disabled
 
 ## Implemented Algorithms
 
@@ -106,6 +116,9 @@ flowchart LR
     LB --> API1["FastAPI Instance 1"]
     LB --> API2["FastAPI Instance 2"]
 
+    API1 --> Services1["Auth / Payments / Search Routes"]
+    API2 --> Services2["Auth / Payments / Search Routes"]
+
     API1 --> Redis["Redis"]
     API2 --> Redis
 
@@ -114,6 +127,10 @@ flowchart LR
 
     PG --> Policies["Rate-Limit Policies"]
     Redis --> State["Shared Counters / Token State / Sliding Logs"]
+    API1 --> Metrics["Prometheus Metrics"]
+    API2 --> Metrics
+    Metrics --> Prom["Prometheus"]
+    Prom --> Grafana["Grafana Dashboard"]
 
     Redis -. "Pub/Sub invalidation" .-> API1
     Redis -. "Pub/Sub invalidation" .-> API2
@@ -138,9 +155,23 @@ Redis has two roles:
 
 Redis is also used for pub/sub invalidation so that all API instances can refresh local policy snapshots when policy definitions change.
 
+#### Platform Service Routes
+
+The project also includes three dummy service routes:
+
+- auth
+- payments
+- search
+
+They reuse the same rate-limiter dependency to show how the limiter can protect multiple platform services without changing the core coordination logic.
+
 #### Nginx
 
 Nginx is included as an optional reverse proxy to demonstrate how multiple API instances can sit behind one entrypoint while still enforcing a single shared quota.
+
+#### Prometheus And Grafana
+
+Prometheus scrapes `/metrics` from both API instances. Grafana is pre-provisioned with a dashboard for traffic, allow/block decisions, latency, cache behavior, retries, and local failover activity.
 
 ## How A Request Flows Through The System
 
@@ -233,14 +264,48 @@ This project includes degraded behavior for Redis failures:
 
 - fail-open for endpoints that should remain available even when Redis is unavailable
 - fail-closed for endpoints where protection is more important than availability
+- bounded local in-memory fallback when `ENABLE_LOCAL_FALLBACK_LIMITER=true`
+- Redis retry before switching to degraded behavior
 
 It also includes:
 
 - Redis timeout handling
+- explicit failover logs such as `[FAILOVER] Switching to local in-memory limiter`
 - startup dependency checks for Redis and PostgreSQL
 - local policy snapshot fallback when Redis policy-cache reads fail
 - pub/sub invalidation for cache refresh
 - multi-instance correctness checks after an instance restart
+- failure tests for timeout, outage, and partition-style divergence
+
+The local failover limiter is intentionally documented as a degraded mode. It protects an individual instance when Redis is unhealthy, but it cannot guarantee cross-instance global correctness during a network partition because each instance is making local decisions.
+
+## Multi-Region Consistency Simulation
+
+The main runtime uses one shared Redis coordination layer to avoid split-brain rate-limit decisions.
+
+To show why that matters, the repository also includes a synthetic India/US regional simulation. The simulator models two regional replicas making local allow/block decisions while replication arrives later.
+
+This makes two consistency issues visible:
+
+- replication lag means one region can decide using stale remote state
+- active-active regional limiters can temporarily oversubscribe the configured global limit
+
+Run it with:
+
+```bash
+make simulate-multi-region
+```
+
+The simulator writes a timestamped report under [`benchmark_results`](benchmark_results/) with:
+
+- configured limit
+- replication lag in milliseconds
+- requests sent from India and US
+- per-region allow/block counts
+- oversubscription
+- stale allowed decisions
+
+This simulation is not part of the production request path. It is included to make the distributed consistency tradeoff concrete.
 
 ## Observability
 
@@ -253,6 +318,8 @@ The project exposes Prometheus metrics for:
 - policy cache hits
 - policy cache misses
 - Redis errors
+- Redis retry attempts
+- local failover activations
 
 These metrics make it possible to answer useful engineering questions:
 
@@ -260,7 +327,16 @@ These metrics make it possible to answer useful engineering questions:
 - how often requests were blocked
 - whether policy lookups are coming from cache or database
 - whether Redis is becoming an error source
+- whether the service is retrying Redis or entering local failover mode
 - how latency changes under synthetic load
+
+The project also emits structured logs for:
+
+- allow
+- block
+- policy load
+- Redis fallback
+- local failover
 
 ## Validation And Benchmarking
 
@@ -282,11 +358,15 @@ Automated tests cover:
 - `429` behavior and headers
 - Redis unavailability behavior
 - Redis timeout behavior
+- local in-memory fallback behavior
+- Redis retry behavior
 - policy cache miss and hit behavior
 - pub/sub invalidation
 - shared Redis state across multiple API instances
 - correctness under concurrent requests
 - correctness after instance restart
+- network-partition-style divergence when only local fallback is available
+- auth, payments, and search service route enforcement
 
 ### Synthetic Load Benchmarking
 
@@ -306,6 +386,8 @@ All benchmark runs are synthetic and should be interpreted as controlled benchma
 
 Results are written to timestamped folders under [`benchmark_results`](benchmark_results/). The repository includes one clean sample result set in [`benchmark_results/sample_multi_instance_benchmark`](benchmark_results/sample_multi_instance_benchmark/) so the output format is visible on GitHub, and additional local runs create new timestamped folders in the same directory.
 
+The benchmark runner also supports a `platform-services` scenario that exercises the auth, payments, and search routes behind the same Redis-backed limiter.
+
 ## Tech Stack
 
 - Python
@@ -318,6 +400,7 @@ Results are written to timestamped folders under [`benchmark_results`](benchmark
 - pytest
 - Locust
 - Prometheus
+- Grafana
 - Nginx
 
 ## Running The Project
@@ -345,6 +428,7 @@ make test-unit
 make test-integration
 make test-concurrency
 make test-failure
+make simulate-multi-region
 ```
 
 ### Run Multi-Instance Deployment
@@ -353,7 +437,7 @@ make test-failure
 cp .env.example .env
 docker compose up -d postgres redis
 docker compose run --rm migrate
-docker compose up -d api1 api2 nginx prometheus
+docker compose up -d api1 api2 nginx prometheus grafana
 ```
 
 Entry points:
@@ -362,13 +446,14 @@ Entry points:
 - `http://localhost:8001` direct to API instance 1
 - `http://localhost:8002` direct to API instance 2
 - `http://localhost:9090` for Prometheus
+- `http://localhost:3000` for Grafana (`admin` / `admin`)
 
 ### Run Synthetic Benchmark
 
 ```bash
 python scripts/run_benchmark.py \
   --target-hosts http://localhost:8001,http://localhost:8002 \
-  --scenario shared-quota \
+  --scenario platform-services \
   --users 80 \
   --spawn-rate 20 \
   --run-time 45s \
@@ -396,6 +481,12 @@ Demo:
 - `GET /demo/public`
 - `GET /demo/protected`
 - `GET /demo/user/{user_id}`
+
+Platform services:
+
+- `POST /services/auth/session`
+- `POST /services/payments/authorize`
+- `GET /services/search/query`
 
 ## Example Policy
 

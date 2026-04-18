@@ -8,9 +8,11 @@ from uuid import uuid4
 import pytest
 from redis.exceptions import RedisError
 
+from app.core.config import Settings
 from app.models.policy import FailureMode, RateLimitAlgorithm
 from app.schemas.policy import PolicyRead
 from app.services.key_builder import RequestIdentity
+from app.services.local_fallback_limiter import LocalFallbackLimiter
 from app.services.rate_limiter import RateLimitDecision, RateLimiterService
 
 
@@ -49,11 +51,27 @@ def build_identity() -> RequestIdentity:
     )
 
 
-def build_service(policy_service: AsyncMock | None = None) -> RateLimiterService:
+def build_service(
+    policy_service: AsyncMock | None = None,
+    *,
+    settings_overrides: dict[str, object] | None = None,
+) -> RateLimiterService:
+    settings_payload = {
+        "database_url": "postgresql+asyncpg://test:test@localhost:5432/test",
+        "redis_url": "redis://localhost:6379/0",
+        "enable_local_fallback_limiter": False,
+        "redis_retry_attempts": 1,
+        "redis_retry_backoff_ms": 0,
+    }
+    if settings_overrides:
+        settings_payload.update(settings_overrides)
+
     return RateLimiterService(
         policy_service=policy_service or AsyncMock(),
         redis_client=AsyncMock(),
         logger=logging.getLogger("rate-limiter-test"),
+        settings=Settings(**settings_payload),
+        local_fallback_limiter=LocalFallbackLimiter(),
     )
 
 
@@ -186,3 +204,66 @@ async def test_evaluate_uses_degraded_decision_when_redis_error_occurs(monkeypat
     assert decision.allowed is True
     assert decision.degraded is True
     assert returned_policy == policy
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_evaluate_retries_redis_before_succeeding(monkeypatch) -> None:
+    policy_service = AsyncMock()
+    policy_service.resolve_policy.return_value = build_policy()
+    service = build_service(policy_service, settings_overrides={"redis_retry_attempts": 1})
+
+    attempts = {"count": 0}
+    successful_decision = RateLimitDecision(
+        allowed=True,
+        limit=15,
+        remaining=14,
+        reset_at_epoch_seconds=123,
+        retry_after_seconds=0,
+    )
+
+    async def run_policy(
+        selected_policy: PolicyRead,
+        identity: RequestIdentity,
+    ) -> RateLimitDecision:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RedisError("temporary redis hiccup")
+        return successful_decision
+
+    monkeypatch.setattr(service, "_run_policy", run_policy)
+
+    decision, _ = await service.evaluate(build_identity())
+
+    assert attempts["count"] == 2
+    assert decision == successful_decision
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_evaluate_uses_local_fallback_when_enabled(monkeypatch) -> None:
+    policy_service = AsyncMock()
+    policy = build_policy(rate=1, burst_capacity=1)
+    policy_service.resolve_policy.return_value = policy
+    service = build_service(
+        policy_service,
+        settings_overrides={"enable_local_fallback_limiter": True, "redis_retry_attempts": 0},
+    )
+
+    async def run_policy(
+        selected_policy: PolicyRead,
+        identity: RequestIdentity,
+    ) -> RateLimitDecision:
+        raise RedisError("redis unavailable")
+
+    monkeypatch.setattr(service, "_run_policy", run_policy)
+
+    first, _ = await service.evaluate(build_identity())
+    second, _ = await service.evaluate(build_identity())
+
+    assert first is not None
+    assert first.allowed is True
+    assert first.local_fallback is True
+    assert second is not None
+    assert second.allowed is False
+    assert second.local_fallback is True

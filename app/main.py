@@ -19,6 +19,7 @@ from app.redis.client import (
     create_pubsub_redis_client,
     create_redis_client,
 )
+from app.services.local_fallback_limiter import LocalFallbackLimiter
 from app.services.policy_cache import PolicySnapshotStore
 
 
@@ -108,6 +109,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.redis = create_redis_client(settings)
         app.state.redis_pubsub = create_pubsub_redis_client(settings)
         app.state.policy_snapshot = PolicySnapshotStore()
+        app.state.local_fallback_limiter = LocalFallbackLimiter(
+            state_ttl_seconds=settings.local_fallback_state_ttl_seconds,
+        )
         listener_task: asyncio.Task[Any] | None = None
 
         startup_status = await run_startup_checks(app)

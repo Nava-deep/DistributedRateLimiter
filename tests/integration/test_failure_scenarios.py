@@ -59,6 +59,41 @@ async def test_fail_open_when_redis_times_out(client, app, admin_headers, monkey
 @pytest.mark.integration
 @pytest.mark.failure
 @pytest.mark.asyncio
+async def test_local_fallback_limiter_enforces_route_limit_during_redis_outage(
+    client,
+    app,
+    admin_headers,
+    monkeypatch,
+) -> None:
+    await client.post(
+        "/admin/policies",
+        json=route_policy(
+            name="protected-local-fallback",
+            route="/demo/protected",
+            burst_capacity=2,
+            failure_mode="fail_closed",
+        ),
+        headers=admin_headers,
+    )
+    monkeypatch.setattr(app.state.settings, "enable_local_fallback_limiter", True)
+    monkeypatch.setattr(app.state.settings, "redis_retry_attempts", 0)
+
+    async def raise_redis_error(*args, **kwargs):
+        raise RedisError("redis unavailable")
+
+    monkeypatch.setattr(app.state.redis, "eval", raise_redis_error)
+
+    first = await client.get("/demo/protected")
+    second = await client.get("/demo/protected")
+    third = await client.get("/demo/protected")
+
+    assert [first.status_code, second.status_code, third.status_code] == [200, 200, 429]
+    assert third.json()["detail"] == "Rate limit exceeded."
+
+
+@pytest.mark.integration
+@pytest.mark.failure
+@pytest.mark.asyncio
 async def test_local_policy_snapshot_allows_requests_when_policy_cache_get_fails(
     client,
     app,
@@ -154,3 +189,62 @@ async def test_shared_state_survives_instance_restart(app_factory, admin_headers
         if not app_a_stopped:
             await lifespan_a.__aexit__(None, None, None)
         await lifespan_b.__aexit__(None, None, None)
+
+
+@pytest.mark.integration
+@pytest.mark.failure
+@pytest.mark.asyncio
+async def test_network_partition_with_local_fallback_causes_per_instance_divergence(
+    app_factory,
+    admin_headers,
+    monkeypatch,
+) -> None:
+    app_a = app_factory(
+        app_instance_name="partition-a",
+        enable_local_fallback_limiter=True,
+        redis_retry_attempts=0,
+    )
+    app_b = app_factory(
+        app_instance_name="partition-b",
+        enable_local_fallback_limiter=True,
+        redis_retry_attempts=0,
+    )
+
+    async with AsyncExitStack() as stack:
+        await stack.enter_async_context(LifespanManager(app_a))
+        await stack.enter_async_context(LifespanManager(app_b))
+        client_a = await stack.enter_async_context(
+            AsyncClient(transport=ASGITransport(app=app_a), base_url="http://partition-a")
+        )
+        client_b = await stack.enter_async_context(
+            AsyncClient(transport=ASGITransport(app=app_b), base_url="http://partition-b")
+        )
+
+        created = await client_a.post(
+            "/admin/policies",
+            json=route_policy(
+                name="partition-local-fallback",
+                route="/demo/protected",
+                rate=2,
+                burst_capacity=2,
+            ),
+            headers=admin_headers,
+        )
+        assert created.status_code == 201
+
+        async def raise_redis_error(*args, **kwargs):
+            raise RedisError("network partition")
+
+        monkeypatch.setattr(app_a.state.redis, "eval", raise_redis_error)
+        monkeypatch.setattr(app_b.state.redis, "eval", raise_redis_error)
+
+        responses = [
+            await client_a.get("/demo/protected"),
+            await client_a.get("/demo/protected"),
+            await client_b.get("/demo/protected"),
+            await client_b.get("/demo/protected"),
+            await client_a.get("/demo/protected"),
+        ]
+
+        assert [response.status_code for response in responses].count(200) == 4
+        assert [response.status_code for response in responses].count(429) == 1

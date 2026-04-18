@@ -38,6 +38,8 @@ async def get_rate_limiter(
         policy_service=policy_service,
         redis_client=request.app.state.redis,
         logger=request.app.state.logger,
+        settings=request.app.state.settings,
+        local_fallback_limiter=request.app.state.local_fallback_limiter,
     )
 
 
@@ -73,7 +75,7 @@ async def enforce_rate_limit(
 
     if not decision.allowed:
         detail = "Rate limit exceeded."
-        if decision.degraded:
+        if decision.degraded and not decision.local_fallback:
             detail = "Rate limiter unavailable in fail-closed mode."
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,

@@ -45,6 +45,18 @@ REDIS_ERRORS_TOTAL = Counter(
     ["operation"],
 )
 
+REDIS_RETRIES_TOTAL = Counter(
+    "distributed_rate_limiter_redis_retries_total",
+    "Redis retry attempts triggered after transient failures.",
+    ["operation"],
+)
+
+LOCAL_FAILOVER_TOTAL = Counter(
+    "distributed_rate_limiter_local_failover_total",
+    "Requests evaluated by the local in-memory fallback limiter.",
+    ["algorithm", "selector_kind"],
+)
+
 
 def observe_http_request(method: str, route: str, status_code: int, latency_seconds: float) -> None:
     labels = {"method": method, "route": route, "status_code": str(status_code)}
@@ -70,6 +82,14 @@ def mark_policy_cache_miss() -> None:
 
 def mark_redis_error(operation: str) -> None:
     REDIS_ERRORS_TOTAL.labels(operation=operation).inc()
+
+
+def mark_redis_retry(operation: str) -> None:
+    REDIS_RETRIES_TOTAL.labels(operation=operation).inc()
+
+
+def mark_local_failover(algorithm: str, selector_kind: str) -> None:
+    LOCAL_FAILOVER_TOTAL.labels(algorithm=algorithm, selector_kind=selector_kind).inc()
 
 
 def render_metrics() -> Response:
