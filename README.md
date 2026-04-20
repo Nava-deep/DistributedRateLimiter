@@ -23,6 +23,16 @@ The service supports:
 
 The goal of the project is not only to block extra requests. The real goal is to do that correctly under concurrency, horizontal scaling, and dependency failures.
 
+## Judge Vortex Integration
+
+This service can now act as the shared submission guard for Judge Vortex.
+
+- `POST /internal/evaluate` accepts a trusted service-to-service identity payload and returns an allow or block decision without proxying the protected request
+- `POST /internal/sync/config-control` pulls the Judge Vortex submission policy from Config Control Plane and upserts it into the local policy store
+- `SERVICE_TOKEN` protects the internal API separately from the admin API token
+
+The default Config Control Plane config name for this path is `judge-vortex.submission-rate-limit-policy`.
+
 ## Why Rate Limiting Is Hard In Distributed Systems
 
 Rate limiting is easy to describe and easy to get wrong.

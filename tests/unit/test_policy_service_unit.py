@@ -386,3 +386,88 @@ async def test_create_policy_persists_model_and_invalidates_cache(monkeypatch) -
     service.session.commit.assert_awaited_once()
     service.session.refresh.assert_awaited_once()
     invalidate.assert_awaited_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_upsert_policy_by_name_creates_missing_policy(monkeypatch) -> None:
+    service = build_service()
+    created_policy = build_policy_read(name="sync-created")
+    create_policy = AsyncMock(return_value=created_policy)
+    monkeypatch.setattr(service, "create_policy", create_policy)
+    execute_result = SimpleNamespace(scalar_one_or_none=lambda: None)
+    service.session.execute.return_value = execute_result
+
+    result, action = await service.upsert_policy_by_name(
+        PolicyCreate(
+            name="sync-created",
+            algorithm=RateLimitAlgorithm.TOKEN_BUCKET,
+            rate=5,
+            window_seconds=60,
+            burst_capacity=5,
+            route="/api/submissions/submit/",
+        )
+    )
+
+    assert action == "created"
+    assert result.name == "sync-created"
+    create_policy.assert_awaited_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_upsert_policy_by_name_updates_existing_policy(monkeypatch) -> None:
+    service = build_service()
+    model = build_policy_model(name="sync-updated", rate=10, burst_capacity=10, version=2)
+    execute_result = SimpleNamespace(scalar_one_or_none=lambda: model)
+    service.session.execute.return_value = execute_result
+    invalidate = AsyncMock()
+    monkeypatch.setattr(service, "invalidate_policy_cache", invalidate)
+
+    result, action = await service.upsert_policy_by_name(
+        PolicyCreate(
+            name="sync-updated",
+            algorithm=RateLimitAlgorithm.TOKEN_BUCKET,
+            rate=25,
+            window_seconds=60,
+            burst_capacity=30,
+            route="/api/submissions/submit/",
+        )
+    )
+
+    assert action == "updated"
+    assert result.rate == 25
+    assert result.version == 3
+    service.session.commit.assert_awaited_once()
+    invalidate.assert_awaited_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_upsert_policy_by_name_skips_write_when_payload_is_unchanged(monkeypatch) -> None:
+    service = build_service()
+    model = build_policy_model(name="sync-unchanged", route="/api/submissions/submit/")
+    execute_result = SimpleNamespace(scalar_one_or_none=lambda: model)
+    service.session.execute.return_value = execute_result
+    invalidate = AsyncMock()
+    monkeypatch.setattr(service, "invalidate_policy_cache", invalidate)
+
+    result, action = await service.upsert_policy_by_name(
+        PolicyCreate(
+            name="sync-unchanged",
+            description="policy model",
+            algorithm=RateLimitAlgorithm.TOKEN_BUCKET,
+            rate=10,
+            window_seconds=60,
+            burst_capacity=10,
+            active=True,
+            priority=1,
+            route="/api/submissions/submit/",
+            failure_mode=FailureMode.FAIL_CLOSED,
+        )
+    )
+
+    assert action == "unchanged"
+    assert result.version == 1
+    service.session.commit.assert_not_awaited()
+    invalidate.assert_not_awaited()

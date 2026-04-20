@@ -6,17 +6,28 @@ from unittest.mock import patch
 import pytest
 from fastapi import HTTPException
 
-from app.core.security import require_admin_token
+from app.core.security import require_admin_token, require_service_token
 
 
-def build_request(provided_token: str | None, expected_token: str = "secret-token"):
+def build_request(
+    provided_token: str | None,
+    *,
+    header_name: str = "X-Admin-Token",
+    expected_admin_token: str = "secret-token",
+    expected_service_token: str = "service-secret",
+):
     headers = {}
     if provided_token is not None:
-        headers["X-Admin-Token"] = provided_token
+        headers[header_name] = provided_token
     return SimpleNamespace(
         headers=headers,
         app=SimpleNamespace(
-            state=SimpleNamespace(settings=SimpleNamespace(admin_token=expected_token))
+            state=SimpleNamespace(
+                settings=SimpleNamespace(
+                    admin_token=expected_admin_token,
+                    service_token=expected_service_token,
+                )
+            )
         ),
     )
 
@@ -73,3 +84,29 @@ async def test_require_admin_token_rejects_case_mismatched_token() -> None:
         await require_admin_token(request)
 
     assert exc_info.value.status_code == 401
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_require_service_token_accepts_matching_token() -> None:
+    request = build_request(
+        "service-secret",
+        header_name="X-Service-Token",
+    )
+
+    assert await require_service_token(request) is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_require_service_token_rejects_invalid_token() -> None:
+    request = build_request(
+        "wrong-secret",
+        header_name="X-Service-Token",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await require_service_token(request)
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Missing or invalid service token."
