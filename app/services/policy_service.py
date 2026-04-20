@@ -100,6 +100,27 @@ class PolicyService:
         await self.session.commit()
         await self.invalidate_policy_cache(reason="delete", policy_id=str(policy.id))
 
+    async def upsert_policy_by_name(self, payload: PolicyCreate) -> tuple[PolicyRead, str]:
+        statement = select(RateLimitPolicy).where(RateLimitPolicy.name == payload.name)
+        result = await self.session.execute(statement)
+        policy = result.scalar_one_or_none()
+        if policy is None:
+            return await self.create_policy(payload), "created"
+
+        next_payload = payload.model_dump()
+        current_payload = self._to_policy_payload(policy)
+        if current_payload == next_payload:
+            return PolicyRead.model_validate(policy), "unchanged"
+
+        for field, value in next_payload.items():
+            setattr(policy, field, value)
+        policy.version += 1
+
+        await self.session.commit()
+        await self.session.refresh(policy)
+        await self.invalidate_policy_cache(reason="sync", policy_id=str(policy.id))
+        return PolicyRead.model_validate(policy), "updated"
+
     async def resolve_policy(self, identity: RequestIdentity) -> PolicyRead | None:
         policies = await self.list_active_policies_cached()
         return select_best_policy(policies, identity)

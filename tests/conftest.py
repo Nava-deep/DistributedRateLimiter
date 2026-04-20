@@ -39,6 +39,7 @@ def build_test_settings(
         "database_url": integration_urls["database_url"],
         "redis_url": integration_urls["redis_url"],
         "admin_token": "integration-admin-token",
+        "service_token": "integration-service-token",
         "strict_startup_checks": True,
         "enable_policy_pubsub": True,
         "log_level": "INFO",
@@ -146,3 +147,8 @@ async def client(app):
 @pytest.fixture
 def admin_headers() -> dict[str, str]:
     return {"X-Admin-Token": "integration-admin-token"}
+
+
+@pytest.fixture
+def service_headers() -> dict[str, str]:
+    return {"X-Service-Token": "integration-service-token"}

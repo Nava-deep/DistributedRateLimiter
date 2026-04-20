@@ -27,6 +27,7 @@ class Settings(BaseSettings):
         alias="REDIS_SOCKET_TIMEOUT_SECONDS",
     )
     admin_token: str = Field(default="change-me", alias="ADMIN_TOKEN")
+    service_token: str = Field(default="change-me-service", alias="SERVICE_TOKEN")
     policy_cache_ttl_seconds: int = Field(default=30, alias="POLICY_CACHE_TTL_SECONDS")
     local_policy_cache_ttl_seconds: int = Field(
         default=15,
@@ -49,6 +50,34 @@ class Settings(BaseSettings):
     redis_retry_attempts: int = Field(default=1, alias="REDIS_RETRY_ATTEMPTS")
     redis_retry_backoff_ms: int = Field(default=25, alias="REDIS_RETRY_BACKOFF_MS")
     request_timeout_seconds: float = Field(default=1.0, alias="REQUEST_TIMEOUT_SECONDS")
+    config_control_base_url: str | None = Field(
+        default=None,
+        alias="CONFIG_CONTROL_BASE_URL",
+    )
+    config_control_environment: str = Field(
+        default="prod",
+        alias="CONFIG_CONTROL_ENVIRONMENT",
+    )
+    config_control_target: str = Field(
+        default="judge-vortex",
+        alias="CONFIG_CONTROL_TARGET",
+    )
+    config_control_policy_name: str = Field(
+        default="judge-vortex.submission-rate-limit-policy",
+        alias="CONFIG_CONTROL_POLICY_NAME",
+    )
+    config_control_client_id: str = Field(
+        default="distributed-rate-limiter",
+        alias="CONFIG_CONTROL_CLIENT_ID",
+    )
+    config_control_user_id: str = Field(
+        default="distributed-rate-limiter",
+        alias="CONFIG_CONTROL_USER_ID",
+    )
+    config_control_role: str = Field(
+        default="reader",
+        alias="CONFIG_CONTROL_ROLE",
+    )
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     @property
