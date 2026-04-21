@@ -1,21 +1,32 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from scripts.run_benchmark import (
-    BenchmarkSummary,
-    benchmark_policy_payloads,
-    create_results_dir,
-    display_scenario_name,
-    normalize_scenario,
-    parse_error_report,
-    parse_locust_console_summary,
-    parse_target_hosts,
-    write_summary,
+ROOT = Path(__file__).resolve().parents[2]
+RUN_BENCHMARK_SPEC = importlib.util.spec_from_file_location(
+    "scripts.run_benchmark",
+    ROOT / "scripts" / "run_benchmark.py",
 )
+assert RUN_BENCHMARK_SPEC is not None
+assert RUN_BENCHMARK_SPEC.loader is not None
+RUN_BENCHMARK_MODULE = importlib.util.module_from_spec(RUN_BENCHMARK_SPEC)
+sys.modules[RUN_BENCHMARK_SPEC.name] = RUN_BENCHMARK_MODULE
+RUN_BENCHMARK_SPEC.loader.exec_module(RUN_BENCHMARK_MODULE)
+
+BenchmarkSummary = RUN_BENCHMARK_MODULE.BenchmarkSummary
+benchmark_policy_payloads = RUN_BENCHMARK_MODULE.benchmark_policy_payloads
+create_results_dir = RUN_BENCHMARK_MODULE.create_results_dir
+display_scenario_name = RUN_BENCHMARK_MODULE.display_scenario_name
+normalize_scenario = RUN_BENCHMARK_MODULE.normalize_scenario
+parse_error_report = RUN_BENCHMARK_MODULE.parse_error_report
+parse_locust_console_summary = RUN_BENCHMARK_MODULE.parse_locust_console_summary
+parse_target_hosts = RUN_BENCHMARK_MODULE.parse_target_hosts
+write_summary = RUN_BENCHMARK_MODULE.write_summary
 
 
 @pytest.mark.unit
