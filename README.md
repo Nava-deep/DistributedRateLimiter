@@ -103,6 +103,18 @@ This service is deployed as a private platform component in the AWS-hosted stack
 - it shares platform observability with Judge Vortex and Config Control Plane
 - its metrics are exposed through the same monitoring surface used by the rest of the platform
 
+### AWS Runtime Measurements
+
+The figures below were sampled from the deployed AWS environment on April 23, 2026. They are live deployment measurements, not local development timings.
+
+Public ingress latency:
+
+- `GET /distributed-rate-limiter/health`: avg `150.11 ms`, p95 `151.59 ms`, p99 `155.05 ms`
+
+Internal service latency on the EC2 host:
+
+- `GET http://127.0.0.1:8000/health`: avg `3.96 ms`, p95 `4.21 ms`, p99 `4.69 ms`
+
 ## Observability
 
 The service exposes operational signals for:
